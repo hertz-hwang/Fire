@@ -95,7 +95,12 @@ extension Defaults.Keys {
     )
     static let showCodeInWindow = Key<Bool>("showCodeInWindow", default: true)
     static let wubiCodeTip = Key<Bool>("wubiCodeTip", default: true)
-    static let wubiAutoCommit = Key<Bool>("wubiAutoCommit", default: false)
+    static let maxCodeLength = Key<Int>("maxCodeLength", default: 4)
+    static let commitMode = Key<CommitMode>("commitMode", default: CommitMode.spaceCommit)
+    static let enablePunctuationCandidateSelect = Key<Bool>(
+        "enablePunctuationCandidateSelect",
+        default: false
+    )
     static let candidateCount = Key<Int>("candidateCount", default: 5)
     static let codeMode = Key<CodeMode>("codeMode", default: CodeMode.wubiPinyin)
 
@@ -127,11 +132,30 @@ extension Defaults.Keys {
     // 标点符号配置
     static let punctuationMode = Key<PunctuationMode>("punctuationMode", default: PunctuationMode.zhhans)
     static let customPunctuationSettings = Key<[String: String]>("customPunctuationSettings", default: punctuation)
-    // 数字后输入"。"自动转为"."
+    // 数字/字母后输入标点自动转为英文标点；连续输入两次相同标点则转为中文标点（如「3..」→「3。」）
     static let enableDotAfterNumber = Key<Bool>("enableDotAfterNumber", default: true)
+    static let enablePunctuationTopScreen = Key<Bool>("enablePunctuationTopScreen", default: false)
     // 在中文和英文之间插入空格，在中文输入模式下生效，也可在英文模式下输入英文再切到中文输入模式下输入中文时生效
-    // 在从中文模式输入中文后再切到英文输入模式下输入英文时不生效
-    static let enableWhitespaceBetweenZhEn = Key<Bool>("enableWhitespaceBetweenZhEn", default: true)
+    // 从中文模式输入中文后再切到英文输入模式下输入英文时生效
+    static let enableWhitespaceBetweenZhEn = Key<Bool>("enableWhitespaceBetweenZhEn", default: false)
+
+    // 快捷键
+    static let openPreferencesShortcutModifier = Key<ModifierKey>(
+        "openPreferencesShortcutModifier",
+        default: ModifierKey.control
+    )
+    static let openPreferencesShortcutKey = Key<String>(
+        "openPreferencesShortcutKey",
+        default: "`"
+    )
+    static let undoCommitShortcutModifier = Key<ModifierKey>(
+        "undoCommitShortcutModifier",
+        default: ModifierKey.control
+    )
+    static let undoCommitShortcutKey = Key<String>(
+        "undoCommitShortcutKey",
+        default: "u"
+    )
 
     static let wbTablePath = Key<String>(
         "wbTableURL",
@@ -184,6 +208,16 @@ enum CodeMode: Int, CaseIterable, Decodable, Encodable, Defaults.Serializable {
     case wubi
     case pinyin
     case wubiPinyin
+}
+
+enum CommitMode: Int, CaseIterable, Decodable, Encodable, Defaults.Serializable {
+    case spaceCommit     // 空格上屏
+    case uniqueAtN       // N码唯一上屏
+    case commitAtM       // 统一第M码顶
+    case emptyCodePush   // 空码顶字上屏
+    case emptyCodeDirect // 空码直接上屏
+    case commitAtM2      // M二顶：第M码时上屏前二码首选
+    case commitAtM3      // M三顶：第M码时上屏前三码首选
 }
 
 let punctuation: [String: String] = [

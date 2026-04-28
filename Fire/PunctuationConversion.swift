@@ -77,7 +77,13 @@ class PunctuationConversion: Conversion {
             return punctuation[origin] == nil ? nil : transformResult(punctuation[origin]!)
         }
         if mode == .custom {
-            return Defaults[.customPunctuationSettings][origin]
+            if let value = Defaults[.customPunctuationSettings][origin] {
+                return value
+            }
+            if let fallback = punctuation[origin] {
+                return transformResult(fallback)
+            }
+            return nil
         }
         return nil
     }

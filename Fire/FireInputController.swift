@@ -16,8 +16,11 @@ typealias NotificationObserver = (name: Notification.Name, callback: (_ notifica
 class FireInputController: IMKInputController {
     private var _candidates: [Candidate] = []
     private var _hasNext: Bool = false
-    private var _lastInputIsNumber = false
+    private var _lastInputIsAlphanumeric = false
+    private var _lastPunctuationKeyCode: UInt16? = nil
     private var _lastInputText = ""
+    private var _lastCommittedText = ""
+    private var _lastCommittedRange: NSRange?
     internal var inputMode: InputMode {
         get { Fire.shared.inputMode }
         set(value) { Fire.shared.inputMode = value }
@@ -89,16 +92,25 @@ class FireInputController: IMKInputController {
         if (markedRange.location > 1000000) {
             markedRange = NSRange(location: 0, length: 0)
         }
-        var previousLocation = selectedRange.location - markedRange.length - 1
+        var previousLocation = selectedRange.location - markedRange.length - count
         // 某些场景下，markedRange的location和length不正常，此处按大小判断一下
         if selectedRange.location < markedRange.location + markedRange.length {
             // selectedRange的location在组字区前
             previousLocation = selectedRange.location - 1
         }
-        if previousLocation <= 0 {
+        if previousLocation < 0 {
             return ""
         }
-        return client().attributedSubstring(from: NSMakeRange(previousLocation, 1))?.string ?? ""
+        return client().attributedSubstring(from: NSMakeRange(previousLocation, count))?.string ?? ""
+    }
+
+    private func getPreviousTextIgnoringMarked(_ count: Int = 1) -> String {
+        let selectedRange = client().selectedRange()
+        let previousLocation = selectedRange.location - count
+        if previousLocation < 0 {
+            return ""
+        }
+        return client().attributedSubstring(from: NSMakeRange(previousLocation, count))?.string ?? ""
     }
 
     // ---- handlers begin -----
@@ -108,12 +120,13 @@ class FireInputController: IMKInputController {
         if event.type == .flagsChanged {
             return nil
         }
-        if event.charactersIgnoringModifiers == nil {
+        if let handled = undoCommitHotkeyHandler(event: event) {
+            return handled
+        }
+        guard let charsIgnoring = event.charactersIgnoringModifiers else {
             return nil
         }
-        guard let num = Int(event.charactersIgnoringModifiers!) else {
-            return nil
-        }
+        guard let num = Int(charsIgnoring) else { return nil }
         if event.modifierFlags == .control &&
             num > 0 && num <= _candidates.count {
             NSLog("hotkey: control + \(num)")
@@ -123,6 +136,71 @@ class FireInputController: IMKInputController {
             return true
         }
         return nil
+    }
+
+    private func undoCommitHotkeyHandler(event: NSEvent) -> Bool? {
+        let required = FireInputController.modifierFlag(for: Defaults[.undoCommitShortcutModifier])
+        guard FireInputController.modifiersMatch(event.modifierFlags, required: required) else { return nil }
+        let key = Defaults[.undoCommitShortcutKey].lowercased()
+        guard let keyCode = FireInputController.keyCode(for: key) else { return nil }
+        if event.keyCode == keyCode {
+            return undoLastCommit()
+        }
+        return nil
+    }
+
+    private static let shortcutModifierMask: NSEvent.ModifierFlags = [
+        .shift, .control, .option, .command, .function
+    ]
+
+    private static func modifiersMatch(_ flags: NSEvent.ModifierFlags,
+                                       required: NSEvent.ModifierFlags) -> Bool {
+        let relevant = flags.intersection(shortcutModifierMask)
+        return relevant == required
+    }
+
+    private static func modifierFlag(for key: ModifierKey) -> NSEvent.ModifierFlags {
+        switch key {
+        case .shift, .leftShift, .rightShift:
+            return .shift
+        case .control:
+            return .control
+        case .option:
+            return .option
+        case .command:
+            return .command
+        case .function:
+            return .function
+        }
+    }
+
+    private static func keyCode(for key: String) -> UInt16? {
+        if key.count != 1 { return nil }
+        let k = key.lowercased()
+        let table: [String: Int] = [
+            "a": kVK_ANSI_A, "b": kVK_ANSI_B, "c": kVK_ANSI_C, "d": kVK_ANSI_D,
+            "e": kVK_ANSI_E, "f": kVK_ANSI_F, "g": kVK_ANSI_G, "h": kVK_ANSI_H,
+            "i": kVK_ANSI_I, "j": kVK_ANSI_J, "k": kVK_ANSI_K, "l": kVK_ANSI_L,
+            "m": kVK_ANSI_M, "n": kVK_ANSI_N, "o": kVK_ANSI_O, "p": kVK_ANSI_P,
+            "q": kVK_ANSI_Q, "r": kVK_ANSI_R, "s": kVK_ANSI_S, "t": kVK_ANSI_T,
+            "u": kVK_ANSI_U, "v": kVK_ANSI_V, "w": kVK_ANSI_W, "x": kVK_ANSI_X,
+            "y": kVK_ANSI_Y, "z": kVK_ANSI_Z,
+            "0": kVK_ANSI_0, "1": kVK_ANSI_1, "2": kVK_ANSI_2, "3": kVK_ANSI_3,
+            "4": kVK_ANSI_4, "5": kVK_ANSI_5, "6": kVK_ANSI_6, "7": kVK_ANSI_7,
+            "8": kVK_ANSI_8, "9": kVK_ANSI_9,
+            "`": kVK_ANSI_Grave,
+            "-": kVK_ANSI_Minus,
+            "=": kVK_ANSI_Equal,
+            "[": kVK_ANSI_LeftBracket,
+            "]": kVK_ANSI_RightBracket,
+            "\\": kVK_ANSI_Backslash,
+            ";": kVK_ANSI_Semicolon,
+            "'": kVK_ANSI_Quote,
+            ",": kVK_ANSI_Comma,
+            ".": kVK_ANSI_Period,
+            "/": kVK_ANSI_Slash
+        ]
+        return table[k].map { UInt16($0) }
     }
 
      func flagChangedHandler(event: NSEvent) -> Bool? {
@@ -143,7 +221,30 @@ class FireInputController: IMKInputController {
             // 输入法需要处理方向键做翻页，所以需要排除方向键
             && event.modifierFlags != .init(arrayLiteral: .numericPad, .function)
         ) {
-            
+            let onlyShift = event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .shift
+            // 标点顶屏: 有输入码时，shift+标点键需要继续传递给 punctuationKeyHandler 处理
+            if onlyShift && _originalString.count > 0 && Defaults[.enablePunctuationTopScreen] {
+                return nil
+            }
+            // 中文模式下，shift+标点键需要传递给 punctuationKeyHandler 处理，以输出中文标点
+            if onlyShift && inputMode == .zhhans,
+               let chars = event.characters, chars.count == 1,
+               punctuation.keys.contains(chars) {
+                return nil
+            }
+            // 中文模式下，shift+字母直接上屏，需检查是否在中文后插入空格
+            if onlyShift && inputMode == .zhhans && _originalString.isEmpty,
+               let chars = event.characters, chars.count == 1,
+               Defaults[.enableWhitespaceBetweenZhEn] {
+                var lastText = getPreviousText()
+                if lastText.isEmpty {
+                    lastText = getPreviousTextIgnoringMarked()
+                }
+                if Utils.shared.shouldConcatWithWhitespace(lastText, chars) {
+                    insertText(" " + chars)
+                    return true
+                }
+            }
             NSLog("[FireInputController] flagChangedHandler no need handle")
             return false
         }
@@ -154,20 +255,61 @@ class FireInputController: IMKInputController {
         NSLog("[FireInputController] enModeHandler")
         // 英文输入模式, 不做任何处理
         if inputMode == .enUS {
+            if Defaults[.enableWhitespaceBetweenZhEn],
+               _originalString.isEmpty,
+               let string = event.characters,
+               (try? NSRegularExpression(pattern: "^[a-zA-Z0-9]+$"))?
+                    .firstMatch(in: string, options: [], range: NSRange(location: 0, length: string.count)) != nil {
+                var lastText = getPreviousText()
+                if lastText.isEmpty {
+                    lastText = getPreviousTextIgnoringMarked()
+                }
+                if Utils.shared.shouldConcatWithWhitespace(lastText, string) {
+                    insertText(" " + string)
+                    return true
+                }
+            }
             return false
         }
         return nil
     }
 
     private func predictorHandler(event: NSEvent) -> Bool? {
-        // 在数字后输入。号自动转换为小数点
-        if Defaults[.enableDotAfterNumber] && event.keyCode == kVK_ANSI_Period && _lastInputIsNumber {
-            insertText(".")
-            _lastInputIsNumber = false
-            return true
+        // 在数字/字母后输入标点时，以英文标点输出；连续输入两次相同标点，则改为输出中文标点
+        // 例：「3,」→「3,」；「3,,」→「3，」；「hello.」→「hello.」；「hello..」→「hello。」
+        if Defaults[.enableDotAfterNumber] && _lastInputIsAlphanumeric && _originalString.isEmpty {
+            let keyCode = event.keyCode
+            // base: 无修饰键字符，用于查 punctuation 字典（字典 key 均为无修饰键字符）
+            // enPunct: 实际应输出的英文标点（含 Shift，如 Shift+; → ":"）
+            if let base = event.charactersIgnoringModifiers, base.count == 1,
+               let chars = event.characters, chars.count == 1,
+               punctuation.keys.contains(base) {
+                let enPunct = chars  // 实际输出字符，如 ":" 而非 ";"
+                if _lastPunctuationKeyCode == keyCode {
+                    // 连续两次相同标点：撤销上次输出的英文标点，改输出中文标点
+                    // 优先用 enPunct（含 Shift，如 ":"）查字典，找不到再用 base（如 ";"）
+                    let zhPunct = PunctuationConversion.shared.conversion(enPunct)
+                        ?? PunctuationConversion.shared.conversion(base)
+                        ?? enPunct
+                    // 删除上次插入的英文标点（1个字符）并替换为中文标点
+                    client()?.insertText(
+                        NSAttributedString(string: zhPunct),
+                        replacementRange: NSRange(location: client().selectedRange().location - 1, length: 1)
+                    )
+                    _lastInputIsAlphanumeric = false
+                    _lastPunctuationKeyCode = nil
+                } else {
+                    // 第一次：输出英文标点（含 Shift 效果，如 ":" 而非 ";"）
+                    insertText(enPunct)
+                    _lastInputIsAlphanumeric = true   // 保留，以便检测下一次是否重复
+                    _lastPunctuationKeyCode = keyCode
+                }
+                return true
+            }
         }
-        _lastInputIsNumber = false
-        
+        _lastInputIsAlphanumeric = false
+        _lastPunctuationKeyCode = nil
+
         _lastInputText = getPreviousText()
         NSLog("[FireInputController] predictorHandler range, selectionRange: \(selectionRange()), replacementRange: \(replacementRange()), client.selectedRange: \(client().selectedRange()), client.markedRange: \(client().markedRange())")
         NSLog("[FireInputController] predictorHandler previous text, \(_lastInputText)")
@@ -251,11 +393,36 @@ class FireInputController: IMKInputController {
                 }
                 return true
             }
-            _lastInputIsNumber = true
             if Defaults[.enableWhitespaceBetweenZhEn] && Utils.shared.shouldConcatWithWhitespace(_lastInputText, string) {
                 // 中文后输入了数字，先插入一个空格
                 insertText(" ")
             }
+            _lastInputIsAlphanumeric = true
+            _lastPunctuationKeyCode = nil
+        }
+        return nil
+    }
+
+    private func candidateSelectKeyHandler(event: NSEvent) -> Bool? {
+        guard inputMode == .zhhans else { return nil }
+        guard _originalString.count > 0 else { return nil }
+        guard Defaults[.enablePunctuationCandidateSelect] else { return nil }
+        // 标点顶屏时，shift+标点键应触发顶屏而非候选选择
+        if Defaults[.enablePunctuationTopScreen] && event.modifierFlags.contains(.shift) { return nil }
+        let keyCode = event.keyCode
+        if keyCode == kVK_ANSI_Semicolon {
+            if _candidates.count >= 2 {
+                insertCandidate(_candidates[1])
+                return true
+            }
+            return nil
+        }
+        if keyCode == kVK_ANSI_Quote {
+            if _candidates.count >= 3 {
+                insertCandidate(_candidates[2])
+                return true
+            }
+            return nil
         }
         return nil
     }
@@ -293,6 +460,18 @@ class FireInputController: IMKInputController {
     private func punctuationKeyHandler(event: NSEvent) -> Bool? {
         // 获取输入的字符
         let string = event.characters!
+        var punctuationInput = string
+        if let base = event.charactersIgnoringModifiers, base.count == 1 {
+            if event.modifierFlags.contains(.shift) {
+                if base == "1" || event.keyCode == kVK_ANSI_1 {
+                    punctuationInput = "!"
+                } else if base == "/" || event.keyCode == kVK_ANSI_Slash {
+                    punctuationInput = "?"
+                }
+            } else {
+                punctuationInput = base
+            }
+        }
         guard inputMode == .zhhans else { return nil }
 
         if !Defaults[.disableTempEnMode]
@@ -303,8 +482,21 @@ class FireInputController: IMKInputController {
             return true
         }
 
+        if Defaults[.enablePunctuationTopScreen]
+            && _originalString.count > 0
+            && _originalString.first != DictManager.shared.tempEnTriggerPunctuation
+            && PunctuationConversion.shared.conversion(punctuationInput) != nil {
+            let converted = PunctuationConversion.shared.conversion(punctuationInput) ?? punctuationInput
+            if let first = _candidates.first, first.type != .placeholder {
+                insertText(first.text + converted)
+            } else {
+                insertText(_originalString + converted)
+            }
+            return true
+        }
+
         // 如果输入的字符是标点符号，转换标点符号为中文符号
-        if inputMode == .zhhans, let result = PunctuationConversion.shared.conversion(string) {
+        if inputMode == .zhhans, let result = PunctuationConversion.shared.conversion(punctuationInput) {
             insertText(result)
             return true
         }
@@ -345,6 +537,7 @@ class FireInputController: IMKInputController {
             deleteKeyHandler,
             charKeyHandler,
             numberKeyHandlder,
+            candidateSelectKeyHandler,
             escKeyHandler,
             enterKeyHandler,
             spaceKeyHandler,
@@ -354,6 +547,40 @@ class FireInputController: IMKInputController {
     }
 
     func updateCandidates(_ sender: Any!) {
+        let mode = Defaults[.commitMode]
+        let count = _originalString.count
+
+        // For M二顶/M三顶, build composite candidates when input length > prefixLength
+        if mode == .commitAtM2 || mode == .commitAtM3,
+           _originalString.first != DictManager.shared.tempEnTriggerPunctuation {
+            let prefixLength = mode == .commitAtM2 ? 2 : 3
+            if count > prefixLength {
+                let prefix = String(_originalString.prefix(prefixLength))
+                let suffix = String(_originalString.dropFirst(prefixLength))
+                let (prefixCandidates, _) = Fire.shared.getCandidates(origin: prefix, page: 1)
+                let (suffixCandidates, suffixHasNext) = Fire.shared.getCandidates(origin: suffix, page: curPage)
+                // First candidate: top of full string
+                let (fullCandidates, _) = Fire.shared.getCandidates(origin: _originalString, page: 1)
+                var merged: [Candidate] = []
+                if let full = fullCandidates.first, full.type != .placeholder {
+                    merged.append(full)
+                }
+                // Composite: prefix top + suffix candidates
+                if let prefixTop = prefixCandidates.first, prefixTop.type != .placeholder {
+                    for sc in suffixCandidates where sc.type != .placeholder {
+                        merged.append(Candidate(
+                            code: prefix + sc.code,
+                            text: prefixTop.text + sc.text,
+                            type: sc.type
+                        ))
+                    }
+                }
+                _candidates = merged
+                _hasNext = suffixHasNext
+                return
+            }
+        }
+
         let (candidates, hasNext) = Fire.shared.getCandidates(origin: self._originalString, page: curPage)
         _candidates = candidates
         _hasNext = hasNext
@@ -362,10 +589,7 @@ class FireInputController: IMKInputController {
     // 更新候选窗口
     func refreshCandidatesWindow() {
         updateCandidates(client())
-        if Defaults[.wubiAutoCommit] && _candidates.count == 1 && _originalString.count >= 4,
-           let candidate = _candidates.first, candidate.type != .placeholder {
-            // 满4码唯一候选词自动上屏
-            insertCandidate(candidate)
+        if shouldAutoCommitCandidate() {
             return
         }
         if !Defaults[.showCodeInWindow] && _candidates.count <= 0 {
@@ -404,13 +628,39 @@ class FireInputController: IMKInputController {
         NSLog("insertText: %@", text)
         if text.count > 0 {
             var newText = text
-            if Defaults[.enableWhitespaceBetweenZhEn] && Utils.shared.shouldConcatWithWhitespace(_lastInputText, text) {
-                newText = " " + newText
-                NSLog("[FireInputController] insertCandidate should append whitespace: \(newText)")
+            if Defaults[.enableWhitespaceBetweenZhEn] {
+                var lastText = getPreviousText()
+                if lastText.isEmpty {
+                    lastText = _lastInputText
+                }
+                if lastText.isEmpty {
+                    lastText = getPreviousTextIgnoringMarked()
+                }
+                if Utils.shared.shouldConcatWithWhitespace(lastText, text) {
+                    newText = " " + newText
+                    NSLog("[FireInputController] insertCandidate should append whitespace: \(newText)")
+                }
+            }
+            let replaceRange = replacementRange()
+            let selectedRange = client().selectedRange()
+            var insertionLocation: Int?
+            if replaceRange.location != NSNotFound {
+                if replaceRange.length == 0 {
+                    insertionLocation = replaceRange.location
+                }
+            } else if selectedRange.location != NSNotFound && selectedRange.location < 1_000_000 {
+                insertionLocation = selectedRange.location
             }
             let value = NSAttributedString(string: newText)
             client()?.insertText(value, replacementRange: replacementRange())
-            _lastInputIsNumber = newText.last != nil && Int(String(newText.last!)) != nil
+            _lastInputIsAlphanumeric = newText.last.map { $0.isASCII && ($0.isNumber || $0.isLetter) } ?? false
+            _lastPunctuationKeyCode = nil
+            _lastCommittedText = newText
+            if let insertionLocation = insertionLocation {
+                _lastCommittedRange = NSRange(location: insertionLocation, length: newText.count)
+            } else {
+                _lastCommittedRange = nil
+            }
         }
         clean()
     }
@@ -420,6 +670,68 @@ class FireInputController: IMKInputController {
         if self._originalString.count > 0 {
             self.insertText(self._originalString)
         }
+    }
+
+    private func shouldAutoCommitCandidate() -> Bool {
+        if _originalString.first == DictManager.shared.tempEnTriggerPunctuation { return false }
+        let mode = Defaults[.commitMode]
+        let maxLen = Defaults[.maxCodeLength]
+        let count = _originalString.count
+        guard let first = _candidates.first else { return false }
+        switch mode {
+        case .spaceCommit:
+            return false
+        case .uniqueAtN:
+            if count == maxLen {
+                if first.type == .placeholder {
+                    clean()
+                    return true
+                } else if _candidates.count == 1 {
+                    insertCandidate(first)
+                    return true
+                }
+            }
+            return tryTopScreenByPrefix(prefixLength: maxLen, fullLength: maxLen + 1)
+        case .commitAtM:
+            return tryTopScreenByPrefix(prefixLength: maxLen, fullLength: maxLen + 1)
+        case .emptyCodePush:
+            if first.type == .placeholder {
+                if count > 1 {
+                    let lastChar = String(_originalString.suffix(1))
+                    let prefix = String(_originalString.dropLast())
+                    let (candidates, _) = Fire.shared.getCandidates(origin: prefix, page: 1)
+                    if let candidate = candidates.first, candidate.type != .placeholder {
+                        insertCandidate(candidate)
+                        _originalString = lastChar
+                        return true
+                    }
+                }
+                insertOriginText()
+                return true
+            }
+            return false
+        case .emptyCodeDirect:
+            if first.type == .placeholder {
+                insertOriginText()
+                return true
+            }
+            return false
+        case .commitAtM2:
+            return tryTopScreenByPrefix(prefixLength: 2, fullLength: maxLen + 1)
+        case .commitAtM3:
+            return tryTopScreenByPrefix(prefixLength: 3, fullLength: maxLen + 1)
+        }
+    }
+
+    private func tryTopScreenByPrefix(prefixLength: Int, fullLength: Int) -> Bool {
+        guard _originalString.count == fullLength else { return false }
+        let prefix = String(_originalString.prefix(prefixLength))
+        let remaining = String(_originalString.dropFirst(prefixLength))
+        let (candidates, _) = Fire.shared.getCandidates(origin: prefix, page: 1)
+        guard let candidate = candidates.first, candidate.type != .placeholder else { return false }
+        insertCandidate(candidate)
+        _originalString = remaining
+        return true
     }
 
     // 获取当前输入的光标位置
@@ -436,5 +748,20 @@ class FireInputController: IMKInputController {
         _originalString = ""
         curPage = 1
         CandidatesWindow.shared.close()
+    }
+
+    private func undoLastCommit() -> Bool {
+        guard _originalString.isEmpty else { return false }
+        guard !_lastCommittedText.isEmpty else { return false }
+        let selectedRange = client().selectedRange()
+        guard selectedRange.location != NSNotFound && selectedRange.location < 1_000_000 else { return false }
+        guard let range = _lastCommittedRange else { return false }
+        guard selectedRange.location == range.location + range.length else { return false }
+        let previousText = client().attributedSubstring(from: range)?.string ?? ""
+        guard previousText == _lastCommittedText else { return false }
+        client()?.insertText(NSAttributedString(string: ""), replacementRange: range)
+        _lastCommittedText = ""
+        _lastCommittedRange = nil
+        return true
     }
 }

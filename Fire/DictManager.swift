@@ -120,6 +120,11 @@ class DictManager {
             return origin
         }
 
+        // 关闭提示编码时，精确匹配当前编码
+        if !Defaults[.wubiCodeTip] {
+            return origin
+        }
+
         if !Defaults[.zKeyQuery] {
             return origin + "*"
         }
