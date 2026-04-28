@@ -14,10 +14,12 @@ struct GeneralPane: View {
 
     @Default(.codeMode) private var code
     @Default(.candidateCount) private var candidateCount
-    @Default(.wubiAutoCommit) private var wubiAutoCommit
     @Default(.wubiCodeTip) private var wubiCodeTip
     @Default(.showCodeInWindow) private var showCodeInWindow
     @Default(.candidatesDirection) private var candidatesDirection
+    @Default(.maxCodeLength) private var maxCodeLength
+    @Default(.commitMode) private var commitMode
+    @Default(.enablePunctuationCandidateSelect) private var enablePunctuationCandidateSelect
     @Default(.inputModeTipWindowType) private var inputModeTipWindowType
     @Default(.zKeyQuery) private var zKeyQuery
     @Default(.toggleInputModeKey) private var toggleInputModeKey
@@ -25,6 +27,11 @@ struct GeneralPane: View {
     @Default(.disableTempEnMode) private var disableTempEnMode
     @Default(.showInputModeStatus) private var showInputModeStatus
     @Default(.enableWhitespaceBetweenZhEn) private var enableWhitespaceBetweenZhEn
+
+    private func chineseNumber(_ n: Int) -> String {
+        let map: [Int: String] = [3: "三", 4: "四", 5: "五", 6: "六", 7: "七", 8: "八", 9: "九", 10: "十"]
+        return map[n] ?? "\(n)"
+    }
 
     var body: some View {
         Settings.Container(contentWidth: 450.0) {
@@ -34,17 +41,33 @@ struct GeneralPane: View {
                         VStack(spacing: 12) {
                             HStack {
                                 Picker("编码方案", selection: $code) {
-                                    Text("五笔").tag(CodeMode.wubi)
+                                    Text("码表").tag(CodeMode.wubi)
                                     Text("拼音").tag(CodeMode.pinyin)
-                                    Text("五笔拼音混合").tag(CodeMode.wubiPinyin)
+                                    Text("码表拼音混合").tag(CodeMode.wubiPinyin)
                                 }
                                 .frame(width: 180)
                                 Spacer(minLength: 50)
                             }
                             HStack {
-                                Toggle("满4码唯一候选词直接上屏", isOn: $wubiAutoCommit)
+                                Picker("最大码长", selection: $maxCodeLength) {
+                                    ForEach(3...9, id: \.self) { n in
+                                        Text("\(n)").tag(n)
+                                    }
+                                }
+                                Spacer(minLength: 20)
+                                Picker("上屏模式", selection: $commitMode) {
+                                    Text("空格上屏").tag(CommitMode.spaceCommit)
+                                    Text("\(chineseNumber(maxCodeLength))码唯一上屏").tag(CommitMode.uniqueAtN)
+                                    Text("统一第\(chineseNumber(maxCodeLength + 1))码顶").tag(CommitMode.commitAtM)
+                                    Text("空码顶字上屏").tag(CommitMode.emptyCodePush)
+                                    Text("空码直接上屏").tag(CommitMode.emptyCodeDirect)
+                                    Text("\(chineseNumber(maxCodeLength + 1))二顶").tag(CommitMode.commitAtM2)
+                                    Text("\(chineseNumber(maxCodeLength + 1))三顶").tag(CommitMode.commitAtM3)
+                                }
                                 Spacer(minLength: 50)
-                                Toggle("提示五笔编码", isOn: $wubiCodeTip)
+                            }
+                            HStack {
+                                Toggle("提示编码", isOn: $wubiCodeTip)
                                 Spacer(minLength: 50)
                             }
                             HStack {
@@ -73,6 +96,10 @@ struct GeneralPane: View {
                             }
                             HStack {
                                 Toggle("候选框显示输入码", isOn: $showCodeInWindow)
+                                Spacer(minLength: 20)
+                            }
+                            HStack {
+                                Toggle("启用;键次选/引号三选", isOn: $enablePunctuationCandidateSelect)
                                 Spacer(minLength: 20)
                             }
                         }
