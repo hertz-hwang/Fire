@@ -50,7 +50,7 @@ struct CandidateView: View {
             }
             Text(candidate.label)
                 .foregroundColor(Color(textColor))
-            if wubiCodeTip {
+            if wubiCodeTip || origin.first == "`" {
                 Text(getShownCode(candidate: candidate, origin: origin))
                     .foregroundColor(Color(codeColor))
             }

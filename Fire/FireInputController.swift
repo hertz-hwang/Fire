@@ -437,10 +437,12 @@ class FireInputController: IMKInputController {
     }
 
     private func enterKeyHandler(event: NSEvent) -> Bool? {
-        // 回车键输入原字符
         if event.keyCode == kVK_Return && _originalString.count > 0 {
-            // 插入原字符
-            insertText(_originalString)
+            if _originalString.first == "`" {
+                clean()
+            } else {
+                insertText(_originalString)
+            }
             return true
         }
         return nil
@@ -453,6 +455,21 @@ class FireInputController: IMKInputController {
                 insertCandidate(first)
             }
             return true
+        }
+        return nil
+    }
+
+    private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
+        guard inputMode == .zhhans else { return nil }
+        guard Defaults[.codeMode] != .pinyin else { return nil }
+        if event.keyCode == kVK_ANSI_Grave {
+            if _originalString.isEmpty {
+                _originalString = "`"
+                return true
+            }
+            if _originalString.first == "`" {
+                return true
+            }
         }
         return nil
     }
@@ -541,12 +558,26 @@ class FireInputController: IMKInputController {
             escKeyHandler,
             enterKeyHandler,
             spaceKeyHandler,
+            reverseLookupKeyHandler,
             punctuationKeyHandler
         ])
         return handler(event) ?? false
     }
 
     func updateCandidates(_ sender: Any!) {
+        if _originalString.first == "`" {
+            let pyQuery = String(_originalString.dropFirst())
+            if pyQuery.isEmpty {
+                _candidates = []
+                _hasNext = false
+                return
+            }
+            let (candidates, hasNext) = DictManager.shared.getReverseLookupCandidates(query: pyQuery, page: curPage)
+            _candidates = candidates
+            _hasNext = hasNext
+            return
+        }
+
         let mode = Defaults[.commitMode]
         let count = _originalString.count
 
@@ -674,6 +705,7 @@ class FireInputController: IMKInputController {
 
     private func shouldAutoCommitCandidate() -> Bool {
         if _originalString.first == DictManager.shared.tempEnTriggerPunctuation { return false }
+        if _originalString.first == "`" { return false }
         let mode = Defaults[.commitMode]
         let maxLen = Defaults[.maxCodeLength]
         let count = _originalString.count

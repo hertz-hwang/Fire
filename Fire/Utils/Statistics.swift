@@ -16,6 +16,12 @@ struct DateCount: Hashable {
     let date: String
 }
 
+struct WordFrequency: Hashable, Identifiable {
+    let text: String
+    let count: Int64
+    var id: String { text }
+}
+
 class Statistics {
     static let shared = Statistics()
 
@@ -117,8 +123,99 @@ class Statistics {
         return 0
     }
 
+    func queryWordFrequency(limit: Int = 50) -> [WordFrequency] {
+        let sql = """
+            SELECT text, COUNT(*) as count
+            FROM data
+            GROUP BY text
+            ORDER BY count DESC
+            LIMIT \(limit)
+        """
+        var queryStatement: OpaquePointer?
+        if sqlite3_prepare_v2(database, sql, -1, &queryStatement, nil) == SQLITE_OK {
+            var results: [WordFrequency] = []
+            while sqlite3_step(queryStatement) == SQLITE_ROW {
+                let text = String(cString: sqlite3_column_text(queryStatement, 0))
+                let count = sqlite3_column_int64(queryStatement, 1)
+                results.append(WordFrequency(text: text, count: count))
+            }
+            sqlite3_finalize(queryStatement)
+            return results
+        } else {
+            sqlite3_finalize(queryStatement)
+            return []
+        }
+    }
+
+    struct Record: Codable {
+        let text: String
+        let type: String
+        let code: String
+        let createdAt: String
+    }
+
+    struct Backup: Codable {
+        let version: Int
+        let exportedAt: String
+        let data: [Record]
+    }
+
+    func backup(to url: URL) throws {
+        let sql = "SELECT text, type, code, createdAt FROM data ORDER BY id ASC"
+        var stmt: OpaquePointer?
+        var records: [Record] = []
+        if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                records.append(Record(
+                    text: String(cString: sqlite3_column_text(stmt, 0)),
+                    type: String(cString: sqlite3_column_text(stmt, 1)),
+                    code: String(cString: sqlite3_column_text(stmt, 2)),
+                    createdAt: String(cString: sqlite3_column_text(stmt, 3))
+                ))
+            }
+        }
+        sqlite3_finalize(stmt)
+        let payload = Backup(version: 1, exportedAt: ISO8601DateFormatter().string(from: Date()), data: records)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        try encoder.encode(payload).write(to: url)
+    }
+
+    func restore(from url: URL, merge: Bool) throws {
+        let payload = try JSONDecoder().decode(Backup.self, from: Data(contentsOf: url))
+        if !merge {
+            sqlite3_exec(database, "DELETE FROM data", nil, nil, nil)
+        }
+        let sql = "INSERT INTO data(text, type, code, createdAt) VALUES (:text, :type, :code, :createdAt)"
+        sqlite3_exec(database, "BEGIN TRANSACTION", nil, nil, nil)
+        for record in payload.data {
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
+                sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":text"), record.text, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":type"), record.type, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":code"), record.code, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":createdAt"), record.createdAt, -1, SQLITE_TRANSIENT)
+                sqlite3_step(stmt)
+            }
+            sqlite3_finalize(stmt)
+        }
+        sqlite3_exec(database, "COMMIT", nil, nil, nil)
+        NotificationCenter.default.post(name: Statistics.updated, object: nil)
+    }
+
+    func exportWordFrequencyCSV(to url: URL) throws {
+        let data = queryWordFrequency(limit: 10000)
+        var csv = "词/字,次数\n"
+        for item in data {
+            // 对文本中的双引号进行转义
+            let escapedText = item.text.replacingOccurrences(of: "\"", with: "\"\"")
+            csv += "\"\(escapedText)\",\(item.count)\n"
+        }
+        try csv.write(to: url, atomically: true, encoding: .utf8)
+    }
+
     func clear() {
-        let sql = "delete * from data"
+        let sql = "delete from data"
         sqlite3_exec(database, sql, nil, nil, nil)
         NotificationCenter.default.post(name: Statistics.updated, object: nil)
     }

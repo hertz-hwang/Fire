@@ -20,6 +20,7 @@ class DictManager {
 
     private var database: OpaquePointer?
     private var queryStatement: OpaquePointer?
+    private var reverseLookupStatement: OpaquePointer?
 
     private init() {
         Defaults.observe(keys: .codeMode, .candidateCount) { () in
@@ -35,7 +36,10 @@ class DictManager {
         prepareStatement()
     }
     func close() {
+        sqlite3_finalize(queryStatement)
         queryStatement = nil
+        sqlite3_finalize(reverseLookupStatement)
+        reverseLookupStatement = nil
         sqlite3_close_v2(database)
         sqlite3_shutdown()
         database = nil
@@ -74,6 +78,28 @@ class DictManager {
             print("prepare ok")
         } else if let err = sqlite3_errmsg(database) {
             print("prepare fail: \(err)")
+        }
+        prepareReverseLookupStatement()
+    }
+
+    private func prepareReverseLookupStatement() {
+        if reverseLookupStatement != nil {
+            sqlite3_finalize(reverseLookupStatement)
+            reverseLookupStatement = nil
+        }
+        let candidateCount = Defaults[.candidateCount]
+        let sql = """
+            select min(wbcode), text, type, min(query) as query
+            from wb_py_dict
+            where query glob :queryLike and type = 'py'
+            group by text
+            order by query, id
+            limit :offset, \(candidateCount + 1)
+        """
+        if sqlite3_prepare_v2(database, sql, -1, &reverseLookupStatement, nil) == SQLITE_OK {
+            print("reverse lookup prepare ok")
+        } else if let err = sqlite3_errmsg(database) {
+            print("reverse lookup prepare fail: \(err)")
         }
     }
 
@@ -190,6 +216,61 @@ class DictManager {
         }
         let duration = CFAbsoluteTimeGetCurrent() - startTime
         NSLog("[DictManager] getCandidates query: \(query) , duration: \(duration)")
+        return (candidates, hasNext: allCount > count)
+    }
+
+    func getReverseLookupCandidates(query: String, page: Int = 1) -> (candidates: [Candidate], hasNext: Bool) {
+        if query.isEmpty { return ([], false) }
+        let queryLike = query + "*"
+        var rawCandidates: [(wbcode: String, text: String)] = []
+        sqlite3_reset(reverseLookupStatement)
+        sqlite3_clear_bindings(reverseLookupStatement)
+        sqlite3_bind_text(reverseLookupStatement,
+                          sqlite3_bind_parameter_index(reverseLookupStatement, ":queryLike"),
+                          queryLike, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(reverseLookupStatement,
+                         sqlite3_bind_parameter_index(reverseLookupStatement, ":offset"),
+                         Int32((page - 1) * Defaults[.candidateCount]))
+        while sqlite3_step(reverseLookupStatement) == SQLITE_ROW {
+            let wbcode = String(cString: sqlite3_column_text(reverseLookupStatement, 0))
+            let text = String(cString: sqlite3_column_text(reverseLookupStatement, 1))
+            rawCandidates.append((wbcode: wbcode, text: text))
+        }
+        let count = Defaults[.candidateCount]
+        let allCount = rawCandidates.count
+        let pageCandidates = Array(rawCandidates.prefix(count))
+
+        // Collect all unique characters across all candidate texts for a single batch lookup
+        var uniqueChars = Set<String>()
+        for c in pageCandidates {
+            c.text.unicodeScalars.forEach { uniqueChars.insert(String($0)) }
+        }
+
+        // One batch query to get the full wubi code (max = longest = full 4-char code) for each char
+        var charCodeMap = [String: String]()
+        if !uniqueChars.isEmpty {
+            let placeholders = uniqueChars.map { _ in "?" }.joined(separator: ",")
+            let sql = "SELECT text, max(wbcode) FROM wb_py_dict WHERE text IN (\(placeholders)) AND type='wb' GROUP BY text"
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
+                for (i, ch) in uniqueChars.enumerated() {
+                    sqlite3_bind_text(stmt, Int32(i + 1), ch, -1, SQLITE_TRANSIENT)
+                }
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    let ch = String(cString: sqlite3_column_text(stmt, 0))
+                    let code = String(cString: sqlite3_column_text(stmt, 1))
+                    charCodeMap[ch] = code
+                }
+            }
+            sqlite3_finalize(stmt)
+        }
+
+        let candidates = pageCandidates.map { raw -> Candidate in
+            let charCodes = raw.text.unicodeScalars.compactMap { charCodeMap[String($0)] }
+            // word-level code first, then individual char codes: "flol|flll olgu"
+            let displayCode = raw.wbcode + (charCodes.isEmpty ? "" : " | " + charCodes.joined(separator: " "))
+            return Candidate(code: displayCode, text: raw.text, type: .py)
+        }
         return (candidates, hasNext: allCount > count)
     }
 
