@@ -10,6 +10,7 @@ import SwiftUI
 import Settings
 import Defaults
 import Combine
+import UniformTypeIdentifiers
 
 func formatCount(_ count: Int64) -> String {
     return NumberFormatter.localizedString(from: NSNumber(value: count), number: .decimal)
@@ -105,10 +106,38 @@ class DateCountData: ObservableObject {
     }
 }
 
+class WordFrequencyData: ObservableObject {
+    @Published var data: [WordFrequency] = []
+
+    var cancellables = Set<AnyCancellable>()
+
+    init() {
+        refresh()
+        NotificationCenter.default
+            .publisher(for: Statistics.updated)
+            .sink { _ in
+                self.refresh()
+            }
+            .store(in: &cancellables)
+    }
+
+    deinit {
+        cancellables.forEach { $0.cancel() }
+        cancellables = []
+    }
+
+    @objc func refresh() {
+        if !FirePreferencesController.shared.isVisible { return }
+        data = Statistics.shared.queryWordFrequency(limit: 50)
+    }
+}
+
 struct StatisticsPane: View {
     @StateObject var dateCountData = DateCountData()
+    @StateObject var wordFrequencyData = WordFrequencyData()
     @Default(.enableStatistics) private var enableStatistics
     @State private var showAlert = false
+    @State private var showExportError = false
 
     func getPath(geo: GeometryProxy) -> Path {
         return Path { path in
@@ -229,6 +258,50 @@ struct StatisticsPane: View {
                     HStack(alignment: .center) {
                         Toggle("启用统计", isOn: $enableStatistics)
                         Spacer()
+                        Button("备份数据") {
+                            let panel = NSSavePanel()
+                            panel.allowedFileTypes = ["json"]
+                            panel.nameFieldStringValue = "统计数据备份.json"
+                            guard panel.runModal() == .OK, let url = panel.url else { return }
+                            do {
+                                try Statistics.shared.backup(to: url)
+                                let alert = NSAlert()
+                                alert.messageText = "备份成功"
+                                alert.runModal()
+                            } catch {
+                                let alert = NSAlert()
+                                alert.messageText = "备份失败"
+                                alert.informativeText = error.localizedDescription
+                                alert.runModal()
+                            }
+                        }
+                        Button("恢复数据") {
+                            let panel = NSOpenPanel()
+                            panel.allowedFileTypes = ["json"]
+                            panel.canChooseFiles = true
+                            panel.canChooseDirectories = false
+                            panel.allowsMultipleSelection = false
+                            guard panel.runModal() == .OK, let url = panel.url else { return }
+                            let confirm = NSAlert()
+                            confirm.messageText = "选择恢复方式"
+                            confirm.informativeText = "合并：保留现有数据并追加备份数据\n替换：清除现有数据后导入备份数据"
+                            confirm.addButton(withTitle: "合并")
+                            confirm.addButton(withTitle: "替换")
+                            confirm.addButton(withTitle: "取消")
+                            let response = confirm.runModal()
+                            guard response != .alertThirdButtonReturn else { return }
+                            do {
+                                try Statistics.shared.restore(from: url, merge: response == .alertFirstButtonReturn)
+                                let alert = NSAlert()
+                                alert.messageText = "恢复成功"
+                                alert.runModal()
+                            } catch {
+                                let alert = NSAlert()
+                                alert.messageText = "恢复失败"
+                                alert.informativeText = error.localizedDescription
+                                alert.runModal()
+                            }
+                        }
                         if #available(macOS 12.0, *) {
                             Button {
                                 dateCountData.clear()
@@ -244,7 +317,6 @@ struct StatisticsPane: View {
                                 Text("清除数据")
                             }
                         }
-
                     }
                     GroupBox(label: Text("累计输入")) {
                         HStack {
@@ -271,6 +343,96 @@ struct StatisticsPane: View {
                             .frame(width: 420, height: 320)
                         } else {
                             drawData(data: dateCountData.data)
+                        }
+                    }
+
+                    GroupBox(label: Text("字词频率")) {
+                        HStack {
+                            Text("Top 50 上屏词频")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            if #available(macOS 12.0, *) {
+                                Button("导出 CSV") {
+                                    let panel = NSSavePanel()
+                                    panel.allowedContentTypes = [UTType.commaSeparatedText]
+                                    panel.nameFieldStringValue = "字词频率.csv"
+                                    if panel.runModal() == .OK, let url = panel.url {
+                                        do {
+                                            try Statistics.shared.exportWordFrequencyCSV(to: url)
+                                        } catch {
+                                            showExportError = true
+                                        }
+                                    }
+                                }
+                                .alert("导出失败", isPresented: $showExportError, actions: {})
+                            } else {
+                                Button("导出 CSV") {
+                                    let panel = NSSavePanel()
+                                    panel.allowedFileTypes = ["csv"]
+                                    panel.nameFieldStringValue = "字词频率.csv"
+                                    if panel.runModal() == .OK, let url = panel.url {
+                                        try? Statistics.shared.exportWordFrequencyCSV(to: url)
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(minLength: 8)
+                        if wordFrequencyData.data.isEmpty {
+                            HStack {
+                                Spacer()
+                                Text("暂无数据")
+                                Spacer()
+                            }
+                            .frame(width: 420, height: 120)
+                        } else {
+                            VStack(spacing: 0) {
+                                // 表头
+                                HStack {
+                                    Text("排名")
+                                        .frame(width: 40, alignment: .center)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("词/字")
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("次数")
+                                        .frame(width: 60, alignment: .trailing)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.black.opacity(0.05))
+
+                                ScrollView {
+                                    LazyVStack(spacing: 0) {
+                                        ForEach(Array(wordFrequencyData.data.enumerated()), id: \.element.id) { (index, item) in
+                                            HStack {
+                                                Text("\(index + 1)")
+                                                    .frame(width: 40, alignment: .center)
+                                                    .foregroundColor(index < 3 ? Color(red: 251/255, green: 82/255, blue: 0) : .primary)
+                                                    .font(index < 3 ? .body.bold() : .body)
+                                                Text(item.text)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                                Text(formatCount(item.count))
+                                                    .frame(width: 60, alignment: .trailing)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 5)
+                                            .background(index % 2 == 0 ? Color.clear : Color.black.opacity(0.03))
+                                        }
+                                    }
+                                }
+                                .frame(width: 420, height: 200)
+                            }
+                            .cornerRadius(4)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                            )
                         }
                     }
                 }
