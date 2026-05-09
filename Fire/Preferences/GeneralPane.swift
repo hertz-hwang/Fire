@@ -16,10 +16,13 @@ struct GeneralPane: View {
     @Default(.candidateCount) private var candidateCount
     @Default(.wubiCodeTip) private var wubiCodeTip
     @Default(.showCodeInWindow) private var showCodeInWindow
+    @Default(.codeInWindowMode) private var codeInWindowMode
     @Default(.candidatesDirection) private var candidatesDirection
     @Default(.maxCodeLength) private var maxCodeLength
     @Default(.commitMode) private var commitMode
+    @Default(.emptyCodeDirectDelay) private var emptyCodeDirectDelay
     @Default(.enablePunctuationCandidateSelect) private var enablePunctuationCandidateSelect
+    @Default(.jianQuanMode) private var jianQuanMode
     @Default(.inputModeTipWindowType) private var inputModeTipWindowType
     @Default(.zKeyQuery) private var zKeyQuery
     @Default(.toggleInputModeKey) private var toggleInputModeKey
@@ -66,6 +69,17 @@ struct GeneralPane: View {
                                 }
                                 Spacer(minLength: 50)
                             }
+                            if commitMode == .emptyCodeDirect {
+                                HStack {
+                                    Text("上屏延迟")
+                                    Slider(value: $emptyCodeDirectDelay, in: 0.1...1.0, step: 0.1) {
+                                        EmptyView()
+                                    }
+                                    Text(String(format: "%.1f 秒", emptyCodeDirectDelay))
+                                        .frame(width: 45, alignment: .trailing)
+                                    Spacer(minLength: 50)
+                                }
+                            }
                             HStack {
                                 Toggle("提示编码", isOn: $wubiCodeTip)
                                 Spacer(minLength: 50)
@@ -98,9 +112,28 @@ struct GeneralPane: View {
                                 Toggle("候选框显示输入码", isOn: $showCodeInWindow)
                                 Spacer(minLength: 20)
                             }
+                            if !showCodeInWindow {
+                                HStack {
+                                    Picker("", selection: $codeInWindowMode) {
+                                        Text("显示输入码（默认）").tag(CodeInWindowMode.inputCode)
+                                        Text("显示首选项").tag(CodeInWindowMode.firstCandidate)
+                                    }
+                                    .frame(width: 200, alignment: .leading)
+                                    Spacer()
+                                }
+                            }
                             HStack {
                                 Toggle("启用;键次选/引号三选", isOn: $enablePunctuationCandidateSelect)
                                 Spacer(minLength: 20)
+                            }
+                            HStack {
+                                Picker("简全模式", selection: $jianQuanMode) {
+                                    Text("默认").tag(JianQuanMode.normal)
+                                    Text("出简让全").tag(JianQuanMode.quanAfterJian)
+                                    Text("出简无全").tag(JianQuanMode.noQuanIfJian)
+                                }
+                                .frame(width: 200, alignment: .leading)
+                                Spacer()
                             }
                         }
                     }

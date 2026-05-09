@@ -94,15 +94,18 @@ extension Defaults.Keys {
         default: CandidatesDirection.horizontal
     )
     static let showCodeInWindow = Key<Bool>("showCodeInWindow", default: true)
+    static let codeInWindowMode = Key<CodeInWindowMode>("codeInWindowMode", default: .inputCode)
     static let wubiCodeTip = Key<Bool>("wubiCodeTip", default: true)
     static let maxCodeLength = Key<Int>("maxCodeLength", default: 4)
     static let commitMode = Key<CommitMode>("commitMode", default: CommitMode.spaceCommit)
+    static let emptyCodeDirectDelay = Key<Double>("emptyCodeDirectDelay", default: 0.3)
     static let enablePunctuationCandidateSelect = Key<Bool>(
         "enablePunctuationCandidateSelect",
         default: false
     )
     static let candidateCount = Key<Int>("candidateCount", default: 5)
     static let codeMode = Key<CodeMode>("codeMode", default: CodeMode.wubiPinyin)
+    static let jianQuanMode = Key<JianQuanMode>("jianQuanMode", default: JianQuanMode.normal)
 
     // 中英文切换配置
     // 禁止切换英文
@@ -121,6 +124,7 @@ extension Defaults.Keys {
     // 主题
     static let themeConfig = Key<ThemeConfig>("themeConfig", default: defaultThemeConfig)
     static let importedThemeConfig = Key<ThemeConfig?>("importedThemeConfig", default: nil)
+    static let hideCandidatesWindow = Key<Bool>("hideCandidatesWindow", default: false)
 
     // 应用输入配置
     static let keepAppInputMode = Key<Bool>("keepAppInputMode", default: true)
@@ -208,6 +212,17 @@ enum CodeMode: Int, CaseIterable, Decodable, Encodable, Defaults.Serializable {
     case wubi
     case pinyin
     case wubiPinyin
+}
+
+enum CodeInWindowMode: Int, Decodable, Encodable, Defaults.Serializable {
+    case inputCode      // 显示输入码（默认）
+    case firstCandidate // 显示首选项
+}
+
+enum JianQuanMode: Int, CaseIterable, Decodable, Encodable, Defaults.Serializable {
+    case normal      // 默认：按码表序显示简码、全码
+    case quanAfterJian  // 出简让全：全码候选后置
+    case noQuanIfJian   // 出简无全：全码候选取消
 }
 
 enum CommitMode: Int, CaseIterable, Decodable, Encodable, Defaults.Serializable {

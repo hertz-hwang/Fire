@@ -44,7 +44,10 @@ extension FireInputController {
 
     override func activateServer(_ sender: Any!) {
         NSLog("[FireInputController] activate server: \(client()?.bundleIdentifier() ?? sender.debugDescription)")
-        
+
+        // 切换输入框时清空已提交文本，避免跨输入框误判是否需要插入空格
+        _lastCommittedText = ""
+
         // 这个保存动作之所以不在 deactivateServer 中做，主要是因为 activateServer 和 deactivateServer 的调用顺序不固定
         // 而 inputMode 是全局的，如果是 activateServer 先调用，则会写入 inputMode
         // 在后调用 deactivateServer 中保存 inputMode 时，保存的已经不是之前的 inputMode 了

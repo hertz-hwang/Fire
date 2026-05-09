@@ -59,6 +59,7 @@
 		67F0B0D32AFFC282006F835D /* StatusBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67F0B0D22AFFC282006F835D /* StatusBarController.swift */; };
 		910DF3B32F6273D000EDA24D /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 67C9A05A2AB5445E000B5281 /* Security.framework */; };
 		91A475092F62847B0047EEBC /* liuli_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = 91A475082F62847B0047EEBC /* liuli_table.txt */; };
+		91A4750C2F62847B0047EEBC /* xiaoxiang_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = 91A4750D2F62847B0047EEBC /* xiaoxiang_table.txt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -128,6 +129,7 @@
 		67C9A05A2AB5445E000B5281 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		67F0B0D22AFFC282006F835D /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
 		91A475082F62847B0047EEBC /* liuli_table.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = liuli_table.txt; sourceTree = "<group>"; };
+		91A4750D2F62847B0047EEBC /* xiaoxiang_table.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = xiaoxiang_table.txt; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -277,6 +279,7 @@
 			isa = PBXGroup;
 			children = (
 				91A475082F62847B0047EEBC /* liuli_table.txt */,
+				91A4750D2F62847B0047EEBC /* xiaoxiang_table.txt */,
 				67C9A01F2AB53ED3000B5281 /* wb_table.txt */,
 				67C9A0202AB53ED3000B5281 /* py_table.txt */,
 				67C9A0212AB53ED3000B5281 /* wb_98_table.txt */,
@@ -425,6 +428,7 @@
 				67C9A0372AB53ED3000B5281 /* wb_table.txt in Resources */,
 				4572854E2BD0EAF90048D67E /* Credits.html in Resources */,
 				91A475092F62847B0047EEBC /* liuli_table.txt in Resources */,
+				91A4750C2F62847B0047EEBC /* xiaoxiang_table.txt in Resources */,
 				67C9A00D2AB53E83000B5281 /* fire.pdf in Resources */,
 				67C9A0392AB53ED3000B5281 /* wb_98_table.txt in Resources */,
 				67C9A0092AB53E83000B5281 /* MainMenu.xib in Resources */,

@@ -35,6 +35,7 @@ struct ThemeConfigView: View {
 struct ThemePane: View {
     @Default(.themeConfig) var themeConfig
     @Default(.importedThemeConfig) var importedThemeConfig
+    @Default(.hideCandidatesWindow) var hideCandidatesWindow
 
     @State private var importedMessage = ""
     @State private var showAlert = false
@@ -101,6 +102,7 @@ struct ThemePane: View {
                         Button("导入", action: importTheme)
                     }
                 }
+                Toggle("隐藏候选区", isOn: $hideCandidatesWindow)
                 GroupBox(label: Text("默认主题")) {
                     ThemeConfigView(
                         themeConfig: defaultThemeConfig,

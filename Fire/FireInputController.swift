@@ -18,8 +18,7 @@ class FireInputController: IMKInputController {
     private var _hasNext: Bool = false
     private var _lastInputIsAlphanumeric = false
     private var _lastPunctuationKeyCode: UInt16? = nil
-    private var _lastInputText = ""
-    private var _lastCommittedText = ""
+    var _lastCommittedText = ""
     private var _lastCommittedRange: NSRange?
     internal var inputMode: InputMode {
         get { Fire.shared.inputMode }
@@ -37,6 +36,23 @@ class FireInputController: IMKInputController {
     deinit {
         NSLog("[FireInputController] deinit")
         clean()
+    }
+
+    private var _autoCommitTimer: DispatchWorkItem?
+
+    private func scheduleAutoCommit(candidate: Candidate) {
+        _autoCommitTimer?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.insertCandidate(candidate)
+        }
+        _autoCommitTimer = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + Defaults[.emptyCodeDirectDelay], execute: item)
+    }
+
+    private func cancelAutoCommit() {
+        _autoCommitTimer?.cancel()
+        _autoCommitTimer = nil
     }
 
     private var _originalString = "" {
@@ -77,6 +93,8 @@ class FireInputController: IMKInputController {
             var selected = self._originalString
             if Defaults[.showCodeInWindow] {
                 selected = self._originalString.count > 0 ? " " : ""
+            } else if Defaults[.codeInWindowMode] == .firstCandidate && !self._originalString.isEmpty {
+                selected = _candidates.first?.text ?? self._originalString
             }
             let text = NSAttributedString(string: selected, attributes: attributes)
             client()?.setMarkedText(text, selectionRange: selectionRange(), replacementRange: replacementRange())
@@ -283,7 +301,8 @@ class FireInputController: IMKInputController {
             // enPunct: 实际应输出的英文标点（含 Shift，如 Shift+; → ":"）
             if let base = event.charactersIgnoringModifiers, base.count == 1,
                let chars = event.characters, chars.count == 1,
-               punctuation.keys.contains(base) {
+               punctuation.keys.contains(base),
+               !(!Defaults[.disableTempEnMode] && inputMode == .zhhans && chars == String(DictManager.shared.tempEnTriggerPunctuation)) {
                 let enPunct = chars  // 实际输出字符，如 ":" 而非 ";"
                 if _lastPunctuationKeyCode == keyCode {
                     // 连续两次相同标点：撤销上次输出的英文标点，改输出中文标点
@@ -310,9 +329,7 @@ class FireInputController: IMKInputController {
         _lastInputIsAlphanumeric = false
         _lastPunctuationKeyCode = nil
 
-        _lastInputText = getPreviousText()
         NSLog("[FireInputController] predictorHandler range, selectionRange: \(selectionRange()), replacementRange: \(replacementRange()), client.selectedRange: \(client().selectedRange()), client.markedRange: \(client().markedRange())")
-        NSLog("[FireInputController] predictorHandler previous text, \(_lastInputText)")
 
         return nil
     }
@@ -393,7 +410,7 @@ class FireInputController: IMKInputController {
                 }
                 return true
             }
-            if Defaults[.enableWhitespaceBetweenZhEn] && Utils.shared.shouldConcatWithWhitespace(_lastInputText, string) {
+            if Defaults[.enableWhitespaceBetweenZhEn] && Utils.shared.shouldConcatWithWhitespace(_lastCommittedText, string) {
                 // 中文后输入了数字，先插入一个空格
                 insertText(" ")
             }
@@ -623,6 +640,10 @@ class FireInputController: IMKInputController {
         if shouldAutoCommitCandidate() {
             return
         }
+        if Defaults[.hideCandidatesWindow] {
+            CandidatesWindow.shared.close()
+            return
+        }
         if !Defaults[.showCodeInWindow] && _candidates.count <= 0 {
             // 不在候选框显示输入码时，如果候选词为空，则不显示候选框
             CandidatesWindow.shared.close()
@@ -634,21 +655,29 @@ class FireInputController: IMKInputController {
             originalString: _originalString,
             topLeft: getOriginPoint()
         )
+        // 候选词更新后重新 mark，确保「显示首选项」模式下文本区显示当前首选
+        if !Defaults[.showCodeInWindow] && Defaults[.codeInWindowMode] == .firstCandidate {
+            markText()
+        }
     }
 
     override func selectionRange() -> NSRange {
         if Defaults[.showCodeInWindow] {
             return NSRange(location: 0, length: min(1, _originalString.count))
         }
+        if Defaults[.codeInWindowMode] == .firstCandidate, let first = _candidates.first {
+            return NSRange(location: 0, length: first.text.count)
+        }
         return NSRange(location: 0, length: _originalString.count)
     }
 
     func insertCandidate(_ candidate: Candidate) {
         insertText(candidate.text)
+        let appBundleId = client()?.bundleIdentifier() ?? ""
         let notification = Notification(
             name: Fire.candidateInserted,
             object: nil,
-            userInfo: [ "candidate": candidate ]
+            userInfo: [ "candidate": candidate, "appBundleId": appBundleId ]
         )
         // 异步派发事件，防止阻塞当前线程
         NotificationQueue.default.enqueue(notification, postingStyle: .whenIdle)
@@ -662,10 +691,10 @@ class FireInputController: IMKInputController {
             if Defaults[.enableWhitespaceBetweenZhEn] {
                 var lastText = getPreviousText()
                 if lastText.isEmpty {
-                    lastText = _lastInputText
+                    lastText = getPreviousTextIgnoringMarked()
                 }
                 if lastText.isEmpty {
-                    lastText = getPreviousTextIgnoringMarked()
+                    lastText = _lastCommittedText
                 }
                 if Utils.shared.shouldConcatWithWhitespace(lastText, text) {
                     newText = " " + newText
@@ -743,9 +772,35 @@ class FireInputController: IMKInputController {
             }
             return false
         case .emptyCodeDirect:
+            cancelAutoCommit()
+            // 顶屏：前缀是完整编码（长度 > 1）时，下一码触发上屏
+            if count > 1 {
+                let prefix = String(_originalString.dropLast())
+                let lastChar = String(_originalString.suffix(1))
+                if prefix.count > 1 {
+                    let (prefixCandidates, _) = Fire.shared.getCandidates(origin: prefix, page: 1)
+                    if let prefixFirst = prefixCandidates.first, prefixFirst.type != .placeholder,
+                       prefixFirst.code == prefix {
+                        insertCandidate(prefixFirst)
+                        _originalString = lastChar
+                        return true
+                    }
+                }
+            }
             if first.type == .placeholder {
                 insertOriginText()
                 return true
+            }
+            if first.code == _originalString {
+                if _candidates.count == 1 {
+                    insertCandidate(first)
+                    return true
+                }
+                // 完整编码有多个候选且编码长度 > 1：300ms 后自动上屏首选
+                if count > 1 {
+                    scheduleAutoCommit(candidate: first)
+                }
+                return false
             }
             return false
         case .commitAtM2:
@@ -777,6 +832,7 @@ class FireInputController: IMKInputController {
 
     func clean() {
         NSLog("[FireInputController] clean")
+        cancelAutoCommit()
         _originalString = ""
         curPage = 1
         CandidatesWindow.shared.close()
