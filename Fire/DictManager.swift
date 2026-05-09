@@ -46,9 +46,8 @@ class DictManager {
     }
 
     private func getStatementSql() -> String {
-        let candidateCount = Defaults[.candidateCount]
         let codeMode = Defaults[.codeMode]
-        // 比显示的候选词数量多查一个，以此判断有没有下一页
+        // 比显示的候选词数量多查一个，以此判断有没有下一页；limit 通过 :limit 参数传入
         let sql = """
             select
                 \(codeMode == .wubiPinyin ? "max(wbcode)" : "min(wbcode)"),
@@ -60,7 +59,7 @@ class DictManager {
                                 : codeMode == .pinyin ? "and type in ('py', 'user')" : "")
             group by text
             order by query, id
-            limit :offset, \(candidateCount + 1)
+            limit :offset, :limit
         """
         return sql
     }
@@ -170,6 +169,27 @@ class DictManager {
             label: "临时英文(空格输出半角符号,连敲;键两下输出全角符号)")]
     }
 
+    // 批量查询每个字词在码表里的最短 wbcode 长度，用于简全模式判断
+    private func getMinWbcodeLengthMap(texts: [String]) -> [String: Int] {
+        guard !texts.isEmpty else { return [:] }
+        let placeholders = texts.map { _ in "?" }.joined(separator: ",")
+        let sql = "SELECT text, min(length(wbcode)) FROM wb_py_dict WHERE text IN (\(placeholders)) AND type IN ('wb', 'user') GROUP BY text"
+        var stmt: OpaquePointer?
+        var result = [String: Int]()
+        if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
+            for (i, t) in texts.enumerated() {
+                sqlite3_bind_text(stmt, Int32(i + 1), t, -1, SQLITE_TRANSIENT)
+            }
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let text = String(cString: sqlite3_column_text(stmt, 0))
+                let minLen = Int(sqlite3_column_int(stmt, 1))
+                result[text] = minLen
+            }
+        }
+        sqlite3_finalize(stmt)
+        return result
+    }
+
     func getCandidates(query: String = String(), page: Int = 1) -> (candidates: [Candidate], hasNext: Bool) {
         if query.count <= 0 {
             return ([], false)
@@ -197,6 +217,14 @@ class DictManager {
                          sqlite3_bind_parameter_index(queryStatement, ":offset"),
                          Int32((page - 1) * Defaults[.candidateCount])
         )
+        let count = Defaults[.candidateCount]
+        let jianQuanMode = Defaults[.jianQuanMode]
+        // 出简让全/出简无全模式下多取数据，过滤后再截取
+        let fetchLimit = jianQuanMode == .normal ? count + 1 : count * 4 + 1
+        sqlite3_bind_int(queryStatement,
+                         sqlite3_bind_parameter_index(queryStatement, ":limit"),
+                         Int32(fetchLimit)
+        )
         while sqlite3_step(queryStatement) == SQLITE_ROW {
             let code = String.init(cString: sqlite3_column_text(queryStatement, 0))
             var text = String.init(cString: sqlite3_column_text(queryStatement, 1))
@@ -207,7 +235,22 @@ class DictManager {
             let candidate = Candidate(code: code, text: text, type: type)
             candidates.append(candidate)
         }
-        let count = Defaults[.candidateCount]
+        if jianQuanMode != .normal {
+            let queryLen = query.count
+            // 批量查询每个候选词在码表里的最短编码长度
+            let texts = candidates.map { $0.text }
+            let minCodeLenMap = getMinWbcodeLengthMap(texts: texts)
+            switch jianQuanMode {
+            case .quanAfterJian:
+                let noJian = candidates.filter { (minCodeLenMap[$0.text] ?? queryLen) >= queryLen }
+                let hasJian = candidates.filter { (minCodeLenMap[$0.text] ?? queryLen) < queryLen }
+                candidates = noJian + hasJian
+            case .noQuanIfJian:
+                candidates = candidates.filter { (minCodeLenMap[$0.text] ?? queryLen) >= queryLen }
+            default:
+                break
+            }
+        }
         let allCount = candidates.count
         candidates = Array(candidates.prefix(count))
 

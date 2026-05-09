@@ -43,7 +43,8 @@ class Statistics {
             return
         }
         if candidate.type == CandidateType.placeholder { return }
-        let sql = "insert into data(text, type, code, createdAt) values (:text, :type, :code, :createdAt)"
+        let appBundleId = notification.userInfo?["appBundleId"] as? String ?? ""
+        let sql = "insert into data(text, type, code, createdAt, appBundleId) values (:text, :type, :code, :createdAt, :appBundleId)"
         var insertStatement: OpaquePointer?
         if sqlite3_prepare_v2(database, sql, -1, &insertStatement, nil) == SQLITE_OK {
             let format = DateFormatter()
@@ -60,6 +61,9 @@ class Statistics {
             sqlite3_bind_text(insertStatement,
                               sqlite3_bind_parameter_index(insertStatement, ":createdAt"),
                               format.string(from: Date()), -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(insertStatement,
+                              sqlite3_bind_parameter_index(insertStatement, ":appBundleId"),
+                              appBundleId, -1, SQLITE_TRANSIENT)
 
             if sqlite3_step(insertStatement) == SQLITE_DONE {
                 sqlite3_finalize(insertStatement)
@@ -77,19 +81,20 @@ class Statistics {
         NotificationCenter.default.post(name: Statistics.updated, object: nil)
     }
 
-    func queryCountByDate(startDate: Date, endDate: Date) -> [DateCount] {
+    func queryCountByDate(startDate: Date, endDate: Date, appBundleId: String? = nil) -> [DateCount] {
         var queryStatement: OpaquePointer?
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         let start = formatter.string(from: startDate)
         let end = formatter.string(from: endDate)
+        let appFilter = appBundleId.map { "AND appBundleId = \"\($0)\"" } ?? ""
         let sql = """
             select date, count from
                 (select
                     date(createdAt) as date,
                     sum(length(text)) as count
                 from data
-                where date(createdAt) >= "\(start)" and date(createdAt) <= "\(end)"
+                where date(createdAt) >= "\(start)" and date(createdAt) <= "\(end)" \(appFilter)
                 group by date(createdAt))
             order by date desc;
             PRAGMA key = 'testkey'
@@ -111,8 +116,9 @@ class Statistics {
         }
     }
 
-    func queryTotalCount() -> Int64 {
-        let sql = "select sum(length(text)) as total from data"
+    func queryTotalCount(appBundleId: String? = nil) -> Int64 {
+        let appFilter = appBundleId.map { "WHERE appBundleId = \"\($0)\"" } ?? ""
+        let sql = "select sum(length(text)) as total from data \(appFilter)"
         var queryStatement: OpaquePointer?
         if sqlite3_prepare_v2(database, sql, -1, &queryStatement, nil) == SQLITE_OK
             && sqlite3_step(queryStatement) == SQLITE_ROW {
@@ -123,10 +129,12 @@ class Statistics {
         return 0
     }
 
-    func queryWordFrequency(limit: Int = 50) -> [WordFrequency] {
+    func queryWordFrequency(limit: Int = 50, appBundleId: String? = nil) -> [WordFrequency] {
+        let appFilter = appBundleId.map { "WHERE appBundleId = \"\($0)\"" } ?? ""
         let sql = """
             SELECT text, COUNT(*) as count
             FROM data
+            \(appFilter)
             GROUP BY text
             ORDER BY count DESC
             LIMIT \(limit)
@@ -147,11 +155,48 @@ class Statistics {
         }
     }
 
+    struct AppCount: Hashable, Identifiable {
+        let appBundleId: String
+        let count: Int64
+        var id: String { appBundleId }
+    }
+
+    func queryCountByApp(startDate: Date? = nil, endDate: Date? = nil) -> [AppCount] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        var conditions: [String] = []
+        if let start = startDate { conditions.append("date(createdAt) >= \"\(formatter.string(from: start))\"") }
+        if let end = endDate { conditions.append("date(createdAt) <= \"\(formatter.string(from: end))\"") }
+        let whereClause = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
+        let sql = """
+            SELECT appBundleId, sum(length(text)) as count
+            FROM data
+            \(whereClause)
+            GROUP BY appBundleId
+            ORDER BY count DESC
+        """
+        var queryStatement: OpaquePointer?
+        if sqlite3_prepare_v2(database, sql, -1, &queryStatement, nil) == SQLITE_OK {
+            var results: [AppCount] = []
+            while sqlite3_step(queryStatement) == SQLITE_ROW {
+                let appBundleId = String(cString: sqlite3_column_text(queryStatement, 0))
+                let count = sqlite3_column_int64(queryStatement, 1)
+                results.append(AppCount(appBundleId: appBundleId, count: count))
+            }
+            sqlite3_finalize(queryStatement)
+            return results
+        } else {
+            sqlite3_finalize(queryStatement)
+            return []
+        }
+    }
+
     struct Record: Codable {
         let text: String
         let type: String
         let code: String
         let createdAt: String
+        let appBundleId: String?
     }
 
     struct Backup: Codable {
@@ -161,7 +206,7 @@ class Statistics {
     }
 
     func backup(to url: URL) throws {
-        let sql = "SELECT text, type, code, createdAt FROM data ORDER BY id ASC"
+        let sql = "SELECT text, type, code, createdAt, appBundleId FROM data ORDER BY id ASC"
         var stmt: OpaquePointer?
         var records: [Record] = []
         if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
@@ -170,7 +215,8 @@ class Statistics {
                     text: String(cString: sqlite3_column_text(stmt, 0)),
                     type: String(cString: sqlite3_column_text(stmt, 1)),
                     code: String(cString: sqlite3_column_text(stmt, 2)),
-                    createdAt: String(cString: sqlite3_column_text(stmt, 3))
+                    createdAt: String(cString: sqlite3_column_text(stmt, 3)),
+                    appBundleId: sqlite3_column_text(stmt, 4).map { String(cString: $0) }
                 ))
             }
         }
@@ -186,7 +232,7 @@ class Statistics {
         if !merge {
             sqlite3_exec(database, "DELETE FROM data", nil, nil, nil)
         }
-        let sql = "INSERT INTO data(text, type, code, createdAt) VALUES (:text, :type, :code, :createdAt)"
+        let sql = "INSERT INTO data(text, type, code, createdAt, appBundleId) VALUES (:text, :type, :code, :createdAt, :appBundleId)"
         sqlite3_exec(database, "BEGIN TRANSACTION", nil, nil, nil)
         for record in payload.data {
             var stmt: OpaquePointer?
@@ -195,6 +241,7 @@ class Statistics {
                 sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":type"), record.type, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":code"), record.code, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":createdAt"), record.createdAt, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":appBundleId"), record.appBundleId ?? "", -1, SQLITE_TRANSIENT)
                 sqlite3_step(stmt)
             }
             sqlite3_finalize(stmt)
@@ -204,13 +251,25 @@ class Statistics {
     }
 
     func exportWordFrequencyCSV(to url: URL) throws {
-        let data = queryWordFrequency(limit: 10000)
-        var csv = "词/字,次数\n"
-        for item in data {
-            // 对文本中的双引号进行转义
-            let escapedText = item.text.replacingOccurrences(of: "\"", with: "\"\"")
-            csv += "\"\(escapedText)\",\(item.count)\n"
+        let sql = """
+            SELECT text, appBundleId, COUNT(*) as count
+            FROM data
+            GROUP BY text, appBundleId
+            ORDER BY count DESC
+            LIMIT 10000
+        """
+        var stmt: OpaquePointer?
+        var csv = "词/字,应用ID,次数\n"
+        if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let text = String(cString: sqlite3_column_text(stmt, 0))
+                let appBundleId = String(cString: sqlite3_column_text(stmt, 1))
+                let count = sqlite3_column_int64(stmt, 2)
+                let escapedText = text.replacingOccurrences(of: "\"", with: "\"\"")
+                csv += "\"\(escapedText)\",\(appBundleId),\(count)\n"
+            }
         }
+        sqlite3_finalize(stmt)
         try csv.write(to: url, atomically: true, encoding: .utf8)
     }
 
@@ -231,7 +290,8 @@ class Statistics {
             "code" TEXT NOT NULL,
             "createdAt" TEXT NOT NULL DEFAULT (datetime('now'))
         )
-        """
+        """,
+        "ALTER TABLE data ADD COLUMN appBundleId TEXT NOT NULL DEFAULT ''"
     ]
 
     private func getVersion() -> Int32 {
@@ -261,8 +321,8 @@ class Statistics {
         if curVersion >= upgrade.count {
             return true
         }
-        upgrade.forEach { sql in
-            sqlite3_exec(database, sql, nil, nil, nil)
+        for i in Int(curVersion)..<upgrade.count {
+            sqlite3_exec(database, upgrade[i], nil, nil, nil)
         }
         NSLog("[Statistics] migrate setVersion: \(upgrade.count)")
         return setVersion(Int32(upgrade.count))
