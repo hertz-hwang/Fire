@@ -21,7 +21,7 @@ struct ColorData: Codable {
 extension Color {
     init(_ colorData: ColorData) {
         self.init(
-            Color.RGBColorSpace.sRGBLinear,
+            Color.RGBColorSpace.sRGB,
             red: colorData.red,
             green: colorData.green,
             blue: colorData.blue,
