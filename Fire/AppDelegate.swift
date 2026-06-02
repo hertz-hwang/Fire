@@ -84,10 +84,93 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statistics = Statistics.shared
         statusBar = StatusBar.shared
         cliServer = FireCLIServer()
+        registerURLHandler()
     }
 
     func applicationWillTerminate(_ aNotification: Notification) {
         // Insert code here to tear down your application
     }
 
+    // MARK: - URL Scheme
+
+    private func registerURLHandler() {
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleURLEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass),
+            andEventID: AEEventID(kAEGetURL)
+        )
+    }
+
+    @objc func handleURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
+        guard
+            let urlString = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+            let url = URL(string: urlString)
+        else { return }
+        handleIncomingURL(url)
+    }
+
+    private func handleIncomingURL(_ url: URL) {
+        guard url.scheme?.lowercased() == "fire" else { return }
+        let host = url.host?.lowercased()
+        let path = url.path.lowercased()
+
+        // 兼容 fire://theme/import 与 fire://import-theme 两种写法
+        let isImport = (host == "theme" && path == "/import") || host == "import-theme"
+        guard isImport else { return }
+
+        guard
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+            let dataItem = components.queryItems?.first(where: { $0.name == "data" }),
+            let encoded = dataItem.value
+        else {
+            showImportAlert(success: false, message: "导入链接缺少 data 参数")
+            return
+        }
+
+        guard let json = decodeBase64URL(encoded) else {
+            showImportAlert(success: false, message: "导入链接的 data 解码失败")
+            return
+        }
+
+        switch parseThemeConfig(jsonData: json) {
+        case .failure(let error):
+            showImportAlert(success: false, message: error.localizedDescription)
+        case .success(let config):
+            confirmAndImport(config)
+        }
+    }
+
+    private func decodeBase64URL(_ s: String) -> String? {
+        var str = s.replacingOccurrences(of: "-", with: "+")
+                   .replacingOccurrences(of: "_", with: "/")
+        let pad = 4 - (str.count % 4)
+        if pad < 4 { str.append(String(repeating: "=", count: pad)) }
+        guard let data = Data(base64Encoded: str) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func confirmAndImport(_ config: ThemeConfig) {
+        let alert = NSAlert()
+        alert.messageText = "导入主题 \(config.name)(\(config.id))？"
+        alert.informativeText = "作者：\(config.author)\n确认后将覆盖现有的已导入主题。"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "导入")
+        alert.addButton(withTitle: "取消")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            applyImportedTheme(config)
+            showImportAlert(success: true, message: "主题 \(config.name) 导入成功")
+        }
+    }
+
+    private func showImportAlert(success: Bool, message: String) {
+        let alert = NSAlert()
+        alert.messageText = success ? "导入成功" : "导入失败"
+        alert.informativeText = message
+        alert.alertStyle = success ? .informational : .warning
+        alert.addButton(withTitle: "确定")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
 }

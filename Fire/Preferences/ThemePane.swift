@@ -14,6 +14,8 @@ struct ThemeConfigView: View {
     let themeConfig: ThemeConfig
     let isUsing: Bool
     let use: () -> Void
+    var onExport: (() -> Void)?
+    var onDelete: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .trailing) {
@@ -22,10 +24,19 @@ struct ThemeConfigView: View {
                 Spacer()
                 Text(themeConfig.author)
             }
-            Button(isUsing ? "正使用" : "使用") {
-                use()
+            HStack {
+                Spacer()
+                if let onExport = onExport {
+                    Button("导出", action: onExport)
+                }
+                if let onDelete = onDelete {
+                    Button("删除", action: onDelete)
+                }
+                Button(isUsing ? "正使用" : "使用") {
+                    use()
+                }
+                .disabled(isUsing)
             }
-            .disabled(isUsing)
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
@@ -56,30 +67,53 @@ struct ThemePane: View {
             showAlert = true
             return
         }
-        guard let themeConfig = loadThemeConfig(jsonData: jsonData) else {
-            importedMessage = "导入失败，请检查文件内容"
+        switch parseThemeConfig(jsonData: jsonData) {
+        case .success(let themeConfig):
+            applyImportedTheme(themeConfig)
+        case .failure(let error):
+            importedMessage = error.localizedDescription
             showAlert = true
-            return
         }
-        if
-            themeConfig.id.count <= 0 ||
-            themeConfig.name.count <= 0 ||
-            themeConfig.author.count <= 0
-        {
-            importedMessage = "请输入ID、名称或作者"
-            showAlert = true
-            return
-        }
-        Defaults[.importedThemeConfig] = themeConfig
-        // 当前使用的和导入的输入法id一致，直接更新
-        if Defaults[.themeConfig].id == themeConfig.id {
-            Defaults[.themeConfig] = themeConfig
-        }
-        print(themeConfig)
     }
 
     func useThemeConfig(themeConfig: ThemeConfig) {
         Defaults[.themeConfig] = themeConfig
+    }
+
+    private func exportTheme(_ themeConfig: ThemeConfig) {
+        guard let json = jsonThemeConfig(config: themeConfig) else {
+            importedMessage = "导出失败"
+            showAlert = true
+            return
+        }
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.json]
+        savePanel.nameFieldStringValue = "\(themeConfig.name)-\(themeConfig.id)-\(themeConfig.author).json"
+        savePanel.canCreateDirectories = true
+        if savePanel.runModal() != .OK { return }
+        guard let url = savePanel.url else { return }
+        do {
+            try json.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            importedMessage = "导出失败：\(error.localizedDescription)"
+            showAlert = true
+        }
+    }
+
+    private func deleteImportedTheme() {
+        guard let imported = Defaults[.importedThemeConfig] else { return }
+        let alert = NSAlert()
+        alert.messageText = "确认删除主题 \(imported.name)(\(imported.id))？"
+        alert.informativeText = "删除后无法恢复，若当前正在使用该主题，将回退到默认主题。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "删除")
+        alert.addButton(withTitle: "取消")
+        if alert.runModal() != .alertFirstButtonReturn { return }
+
+        if Defaults[.themeConfig].id == imported.id {
+            Defaults[.themeConfig] = defaultThemeConfig
+        }
+        Defaults[.importedThemeConfig] = nil
     }
 
     var body: some View {
@@ -115,7 +149,9 @@ struct ThemePane: View {
                             isUsing: importedThemeConfig.id == themeConfig.id,
                             use: {
                                 useThemeConfig(themeConfig: importedThemeConfig)
-                            }
+                            },
+                            onExport: { exportTheme(importedThemeConfig) },
+                            onDelete: { deleteImportedTheme() }
                         )
                     }
                 }
