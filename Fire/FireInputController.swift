@@ -346,6 +346,12 @@ class FireInputController: IMKInputController {
             _lastInputIsNumber = false
             return true
         }
+        // 在数字后输入“：”，自动转为英文半角冒号
+        if Defaults[.enableColonAfterNumber] && event.keyCode == kVK_ANSI_Semicolon && _lastInputIsNumber {
+            insertText(":")
+            _lastInputIsNumber = false
+            return true
+        }
         _lastInputIsNumber = false
         
         _lastInputText = getPreviousText()

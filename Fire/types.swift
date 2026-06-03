@@ -139,6 +139,8 @@ extension Defaults.Keys {
     static let customPunctuationSettings = Key<[String: String]>("customPunctuationSettings", default: punctuation)
     // 数字后输入"。"自动转为"."
     static let enableDotAfterNumber = Key<Bool>("enableDotAfterNumber", default: true)
+    // 数字后输入"："自动转为":"
+    static let enableColonAfterNumber = Key<Bool>("enableColonAfterNumber", default: true)
     // 在中文和英文之间插入空格，在中文输入模式下生效，也可在英文模式下输入英文再切到中文输入模式下输入中文时生效
     // 在从中文模式输入中文后再切到英文输入模式下输入英文时不生效
     static let enableWhitespaceBetweenZhEn = Key<Bool>("enableWhitespaceBetweenZhEn", default: true)
