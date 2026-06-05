@@ -14,6 +14,7 @@ struct PunctuationPane: View {
     @Default(.punctuationMode) private var punctuationMode
     @Default(.customPunctuationSettings) private var customPunctuationSettings
     @Default(.enableDotAfterNumber) private var enableDotAfterNumber
+    @Default(.enableColonAfterNumber) private var enableColonAfterNumber
     var body: some View {
         Settings.Container(contentWidth: 450) {
             Settings.Section(title: "") {
@@ -26,7 +27,10 @@ struct PunctuationPane: View {
                     Spacer(minLength: 150)
                 }
                 HStack {
-                    Toggle("数字后输入 “。”自动转为 “.”", isOn: $enableDotAfterNumber)
+                    Toggle("数字后输入 “。” 自动转为 “.”，适用于 1.5 小数场景", isOn: $enableDotAfterNumber)
+                }
+                HStack {
+                    Toggle("数字后输入 “：”（全角） 自动转为 “:”（半角），适用于 12:45 时间场景", isOn: $enableColonAfterNumber)
                 }
                 VStack(alignment: .leading) {
                     Text("自定义符号")

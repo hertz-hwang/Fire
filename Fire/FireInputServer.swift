@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import Carbon
 import Defaults
 
 extension FireInputController {
@@ -52,7 +53,19 @@ extension FireInputController {
 
         CandidatesWindow.shared.inputController = self
 
+        if IsSecureEventInputEnabled() {
+            /** 安全事件输入模式指输入密码的场景
+             * 一般情况下系统会自动切换到 ABC 输入法，在输入过程中不会调用第三方输入法
+             * 但在删除系统 ABC 输入法的情况下，仍然有可能会调用到第三方输入法 https://github.com/qwertyyb/Fire/issues/158
+             * 在这种情况下，输入法需要切换到英文模式，避免影响用户输入密码
+             */
+            Fire.shared.toggleInputMode(.enUS, showTip: Fire.shared.inputMode != .enUS)
+            return
+        }
+
         if Defaults[.disableEnMode] {
+            // 由于 disableEnMode 为 true，所以需要切换到中文模式
+            Fire.shared.toggleInputMode(.zhhans, showTip: Fire.shared.inputMode != .zhhans)
             return
         }
 
