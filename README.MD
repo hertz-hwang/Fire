@@ -1,11 +1,20 @@
-![业火五笔输入法](https://github.com/qwertyyb/Fire/blob/ee8546aad395e4e6b3b1b756cfbd4f908c5dfe89/Fire/Assets.xcassets/AppIcon.appiconset/icon-256.png)
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fqwertyyb%2FFire.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fqwertyyb%2FFire?ref=badge_shield)
-
 # 业火五笔输入法
-![](https://github.com/qwertyyb/FireWubi/workflows/CI/badge.svg)
-![swift](https://img.shields.io/badge/swift-green.svg)
-[![codebeat badge](https://codebeat.co/badges/f15efd85-e85d-4f72-87ab-f204abd17412)](https://codebeat.co/projects/github-com-qwertyyb-fire-master)
-![GitHub release (latest by date including pre-releases)](https://img.shields.io/github/v/release/qwertyyb/Fire?include_prereleases)
+![业火五笔输入法](https://github.com/qwertyyb/Fire/blob/ee8546aad395e4e6b3b1b756cfbd4f908c5dfe89/Fire/Assets.xcassets/AppIcon.appiconset/icon-256.png)
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fqwertyyb%2FFire.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fqwertyyb%2FFire?ref=badge_shield)
+![GitHub Release](https://img.shields.io/github/v/release/qwertyyb/Fire)
+![GitHub License](https://img.shields.io/github/license/qwertyyb/Fire)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/qwertyyb/Fire/build.yml)
+![GitHub Downloads (specific asset, all releases)](https://shields.io/github/downloads/qwertyyb/Fire/FireInstaller.pkg?displayAssetName=false)
+![GitHub Repo stars](https://img.shields.io/github/stars/qwertyyb/Fire)
+
+
+## 💰 打赏支持
+如果本项目对你有帮助，欢迎请作者喝杯咖啡，你的支持是持续更新的动力~
+
+| 微信 | 支付宝 |
+| ---- | ---- |
+| <img alt="微信赞赏码" src="./assets/wechat.jpg" width="240"> | <img alt="支付宝收款码" src="./assets/alipay.jpg" width="240"> |
 
 ## 介绍
 
