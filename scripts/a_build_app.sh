@@ -14,14 +14,12 @@ mkdir -p "$EXPORT_PATH"
 xcodebuild clean -project "$PROJECT" -scheme "$TARGET" -configuration Release  || { echo "clean Failed"; exit 1; }
 
 PRODUCT_SETTINGS_PATH="$PROJECT_ROOT/Fire/Info.plist"
-version=$(git describe --tags `git rev-list --tags --max-count=1`)
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" $PRODUCT_SETTINGS_PATH
-vv=`date "+%Y%m%d%H%M%S"`
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $vv" $PRODUCT_SETTINGS_PATH
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $NEXT_VERSION" $PRODUCT_SETTINGS_PATH
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_VERSION" $PRODUCT_SETTINGS_PATH
 
 echo "version"
-echo $version
-echo $vv
+echo $NEXT_VERSION
+echo $BUILD_VERSION
 
 xcodebuild archive -project "$PROJECT" -scheme Fire -archivePath "$EXPORT_ARCHIVE" -configuration Release $BUILD_FLAG || { echo "Archive Failed:"; exit 1; }
 
