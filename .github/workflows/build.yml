@@ -62,14 +62,12 @@ jobs:
         run: |
           {
             echo "text<<ENDOFTEXT"
-            echo '### [💰 打赏支持](https://github.com/qwertyyb/Fire#-打赏支持)'
-            echo '如果本项目对你有帮助，欢迎请作者喝杯咖啡，你的支持是持续更新的动力~'
-            echo ''
-            echo '| 微信 | 支付宝 |'
-            echo '| ---- | ---- |'
-            echo '| <img alt="微信赞赏码" src="https://cdn.qwertyyb.cn/static/wx.jpg" width="240"> | <img alt="支付宝收款码" src="https://cdn.qwertyyb.cn/static/alipay.jpg" width="240"> |'
-            echo ''
             echo "$CHANGELOG"
+            echo ''
+            echo '### 💰 打赏支持'
+            echo '如果本项目对你有帮助，欢迎[请作者喝杯咖啡](https://github.com/qwertyyb/Fire#-打赏支持)，你的支持是持续更新的动力~'
+            echo ''
+            echo '<img alt="微信赞赏码" src="https://cdn.qwertyyb.cn/static/wx.jpg" width="200">'
             echo "ENDOFTEXT"
           } >> "$GITHUB_OUTPUT"
 
