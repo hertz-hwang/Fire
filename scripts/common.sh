@@ -14,6 +14,8 @@ EXPORT_APP="$EXPORT_PATH/$TARGET.app"
 EXPORT_ZIP="$EXPORT_PATH/$TARGET.zip"
 EXPORT_INSTALLER="$EXPORT_PATH/FireInstaller.pkg"
 EXPORT_INSTALLER_ZIP="$EXPORT_PATH/FireInstaller.zip"
+NEXT_VERSION=${NEXT_VERSION:-$(git describe --tags `git rev-list --tags --max-count=1`)}
+BUILD_VERSION=${BUILD_VERSION:-$(date "+%Y%m%d%H%M%S")}
 
 if [[ $USE_CODE_SIGN == "enable" ]]
 then

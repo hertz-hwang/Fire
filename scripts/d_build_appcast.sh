@@ -11,8 +11,6 @@ fi
 
 download_url='https://github.com/qwertyyb/Fire/releases/latest/download/FireInstaller.zip'
 
-version=$(git describe --tags `git rev-list --tags --max-count=1`)
-
 str=$($PROJECT_ROOT/bin/sign_update -s "${sparkle_key}" "$EXPORT_INSTALLER_ZIP")
 
 sign=$(echo $str | grep "edSignature=\"[^\"]*" -o | grep "\"[^\"]*" -o)
@@ -33,7 +31,7 @@ fi
 
 CFBundleVersion=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PROJECT_ROOT/Fire/Info.plist")
 
-echo "${version}"
+echo "${NEXT_VERSION}"
 echo "${CFBundleVersion}"
 
 cat>$EXPORT_PATH/appcast.xml<<EOF
@@ -42,7 +40,7 @@ cat>$EXPORT_PATH/appcast.xml<<EOF
     <channel>
         <title>${APP_NAME}</title>
         <item>
-            <title>${version}</title>
+            <title>${NEXT_VERSION}</title>
             <pubDate>$(date -R)</pubDate>
             <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
             <description><![CDATA[
@@ -51,7 +49,7 @@ cat>$EXPORT_PATH/appcast.xml<<EOF
             </description>
             <enclosure url="${download_url}"
               sparkle:version="${CFBundleVersion}"
-              sparkle:shortVersionString="${version}"
+              sparkle:shortVersionString="${NEXT_VERSION}"
               length="${length}"
               sparkle:edSignature="${sign}"
               type="application/octet-stream"/>
