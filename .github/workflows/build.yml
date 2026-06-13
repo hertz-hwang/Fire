@@ -42,23 +42,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         id: checkout
-        if: github.event_name != 'workflow_dispatch'
+        if: github.event_name != 'workflow_dispatch' || inputs.release_notes == ''
         with:
           submodules: false
 
       - name: Conventional Changelog Action
         id: changelog
-        if: github.event_name != 'workflow_dispatch'
+        if: github.event_name != 'workflow_dispatch' || inputs.release_notes == ''
         uses: TriPSs/conventional-changelog-action@v3
         with:
           github-token: ${{ secrets.github_token }}
           skip-commit: "true"
           output-file: "false"
       
+      - name: combine donation and changelog
+        id: combine_text
+        env:
+          CHANGELOG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_notes || steps.changelog.outputs.clean_changelog }}
+        run: |
+          {
+            echo "text<<ENDOFTEXT"
+            echo '### [💰 打赏支持](https://github.com/qwertyyb/Fire#-打赏支持)'
+            echo '如果本项目对你有帮助，欢迎请作者喝杯咖啡，你的支持是持续更新的动力~'
+            echo ''
+            echo '| 微信 | 支付宝 |'
+            echo '| ---- | ---- |'
+            echo '| <img alt="微信赞赏码" src="https://cdn.qwertyyb.cn/static/wx.jpg" width="240"> | <img alt="支付宝收款码" src="https://cdn.qwertyyb.cn/static/alipay.jpg" width="240"> |'
+            echo ''
+            echo "$CHANGELOG"
+            echo "ENDOFTEXT"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: lifepal/markdown-to-html@v1.2
         id: create_html
         with:
-          text: ${{ github.event_name == 'workflow_dispatch' && inputs.release_notes || steps.changelog.outputs.clean_changelog }}
+          text: ${{ steps.combine_text.outputs.text }}
 
   build_binary:
     runs-on: macos-latest
