@@ -95,6 +95,7 @@ enum PunctuationMode: Codable, Defaults.Serializable {
 
 extension Defaults.Keys {
     static let zKeyQuery = Key<Bool>("zKeyQuery", default: true)
+    static let zKeyRepeat = Key<Bool>("zKeyRepeat", default: true)
     static let candidatesDirection = Key<CandidatesDirection>(
         "candidatesDirection",
         default: CandidatesDirection.horizontal
@@ -250,7 +251,7 @@ enum CommitMode: Int, CaseIterable, Decodable, Encodable, Defaults.Serializable 
 let punctuation: [String: String] = [
     ",": "，",
     ".": "。",
-    "/": "、",
+    "/": "/",
     ";": "；",
     "'": "‘",
     "[": "【",
@@ -261,13 +262,13 @@ let punctuation: [String: String] = [
     "#": "#",
     "$": "￥",
     "%": "%",
-    "^": "……",
+    "^": "^",
     "&": "&",
     "*": "*",
     "(": "（",
     ")": "）",
     "-": "-",
-    "_": "——",
+    "_": "_",
     "+": "+",
     "=": "=",
     "~": "~",

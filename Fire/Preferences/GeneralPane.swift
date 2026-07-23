@@ -26,6 +26,7 @@ struct GeneralPane: View {
     @Default(.extraCandidateSelectKeys) private var extraCandidateSelectKeys
     @Default(.inputModeTipWindowType) private var inputModeTipWindowType
     @Default(.zKeyQuery) private var zKeyQuery
+    @Default(.zKeyRepeat) private var zKeyRepeat
     @Default(.toggleInputModeKey) private var toggleInputModeKey
     @Default(.disableEnMode) private var disableEnMode
     @Default(.disableTempEnMode) private var disableTempEnMode
@@ -87,6 +88,10 @@ struct GeneralPane: View {
                             }
                             HStack {
                                 Toggle("z键查询", isOn: $zKeyQuery)
+                                Spacer(minLength: 50)
+                            }
+                            HStack {
+                                Toggle("z键重复上屏", isOn: $zKeyRepeat)
                                 Spacer(minLength: 50)
                             }
                         }
