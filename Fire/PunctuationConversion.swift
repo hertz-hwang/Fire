@@ -21,7 +21,7 @@ class PunctuationConversion: Conversion {
         "「": 0,
         "」": 0
     ]
-    
+
     // 转换单双引号
     // 基本思路: 第一次按引号输入左引号，第二次按输入右引号
     private func transformQuoteResult(_ result: String) -> String {
@@ -38,32 +38,32 @@ class PunctuationConversion: Conversion {
         }
         return result
     }
-    
+
     // 转换方括号
     // 基本思路: 第一次按{输出「，第二次按{输出『，按}时，以左括号为优先进行匹配
-    private func transformSquareBrackets(_ result: String) -> String {
-        if !squareBracketsCount.keys.contains(result) {
-            return result
-        }
-        let resultMap = [
-            "「": "『",
-            "」": "』"
-        ]
-        
-        squareBracketsCount[result] = (squareBracketsCount[result]! + 1) % 2
-        if result == "「" {
-            squareBracketsCount["」"] = (squareBracketsCount[result]! + 1) % 2
-        }
-        if squareBracketsCount[result] == 0 {
-            return resultMap[result]!
-        }
-        return result
-    }
-    
+    //private func transformSquareBrackets(_ result: String) -> String {
+    //    if !squareBracketsCount.keys.contains(result) {
+    //        return result
+    //    }
+    //    let resultMap = [
+    //        "「": "『",
+    //        "」": "』"
+    //    ]
+    //
+    //    squareBracketsCount[result] = (squareBracketsCount[result]! + 1) % 2
+    //    if result == "「" {
+    //        squareBracketsCount["」"] = (squareBracketsCount[result]! + 1) % 2
+    //    }
+    //    if squareBracketsCount[result] == 0 {
+    //        return resultMap[result]!
+    //    }
+    //    return result
+    //}
+
     private func transformResult(_ result: String) -> String {
-        return transformQuoteResult(transformSquareBrackets(result))
+        return transformQuoteResult(result)
     }
-    
+
     func conversion(_ origin: String) -> String? {
         let isPunctuation = punctuation.keys.contains(origin)
         if !isPunctuation {
@@ -87,6 +87,6 @@ class PunctuationConversion: Conversion {
         }
         return nil
     }
-    
+
     static let shared = PunctuationConversion()
 }

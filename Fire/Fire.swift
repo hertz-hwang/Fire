@@ -83,7 +83,7 @@ class Fire: NSObject {
         if origin.count <= 0 {
             return ([], false)
         }
-        if origin == "z" {
+        if Defaults[.zKeyRepeat] && origin == "z" {
             let text = lastCommittedText.isEmpty ? "业火五笔输入法" : lastCommittedText
             let candidate = Candidate(code: "z", text: text, type: .user)
             return ([candidate], false)
