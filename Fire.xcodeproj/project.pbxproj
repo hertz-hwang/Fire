@@ -40,6 +40,7 @@
 		67C9A0392AB53ED3000B5281 /* wb_98_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = 67C9A0212AB53ED3000B5281 /* wb_98_table.txt */; };
 		67C9A03A2AB53ED3000B5281 /* FireInputServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A0222AB53ED3000B5281 /* FireInputServer.swift */; };
 		67C9A03C2AB53ED3000B5281 /* StatisticsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A0252AB53ED3000B5281 /* StatisticsPane.swift */; };
+		AABB0001STAT00001 /* StatsViewComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABB0001STATF0001 /* StatsViewComponents.swift */; };
 		67C9A03D2AB53ED3000B5281 /* FirePreferencesController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A0262AB53ED3000B5281 /* FirePreferencesController.swift */; };
 		67C9A03E2AB53ED3000B5281 /* UserDictPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A0272AB53ED3000B5281 /* UserDictPane.swift */; };
 		67C9A03F2AB53ED3000B5281 /* GeneralPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A0282AB53ED3000B5281 /* GeneralPane.swift */; };
@@ -114,6 +115,7 @@
 		67C9A0222AB53ED3000B5281 /* FireInputServer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FireInputServer.swift; sourceTree = "<group>"; };
 		67C9A0232AB53ED3000B5281 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		67C9A0252AB53ED3000B5281 /* StatisticsPane.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = StatisticsPane.swift; sourceTree = "<group>"; };
+		AABB0001STATF0001 /* StatsViewComponents.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = StatsViewComponents.swift; sourceTree = "<group>"; };
 		67C9A0262AB53ED3000B5281 /* FirePreferencesController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FirePreferencesController.swift; sourceTree = "<group>"; };
 		67C9A0272AB53ED3000B5281 /* UserDictPane.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = UserDictPane.swift; sourceTree = "<group>"; };
 		67C9A0282AB53ED3000B5281 /* GeneralPane.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GeneralPane.swift; sourceTree = "<group>"; };
@@ -291,6 +293,7 @@
 			isa = PBXGroup;
 			children = (
 				67C9A0252AB53ED3000B5281 /* StatisticsPane.swift */,
+				AABB0001STATF0001 /* StatsViewComponents.swift */,
 				67C9A0262AB53ED3000B5281 /* FirePreferencesController.swift */,
 				67C9A0272AB53ED3000B5281 /* UserDictPane.swift */,
 				67C9A0282AB53ED3000B5281 /* GeneralPane.swift */,
@@ -463,6 +466,7 @@
 				67C9A00C2AB53E83000B5281 /* StatusBar.swift in Sources */,
 				67C9A03D2AB53ED3000B5281 /* FirePreferencesController.swift in Sources */,
 				67C9A03C2AB53ED3000B5281 /* StatisticsPane.swift in Sources */,
+				AABB0001STAT00001 /* StatsViewComponents.swift in Sources */,
 				67C9A0322AB53ED3000B5281 /* CandidatesView.swift in Sources */,
 				4569ED0B2C92C4360075CF8F /* CLI.swift in Sources */,
 				67C9A00B2AB53E83000B5281 /* Utils.swift in Sources */,
