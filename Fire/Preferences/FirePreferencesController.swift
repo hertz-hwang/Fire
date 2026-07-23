@@ -35,7 +35,8 @@ class FirePreferencesController: NSObject, NSWindowDelegate {
                 Settings.Pane(
                     identifier: Settings.PaneIdentifier(rawValue: "快捷键"),
                      title: "快捷键",
-                    toolbarIcon: NSImage(named: NSImage.preferencesGeneralName)
+                    toolbarIcon: NSImage(systemSymbolName: "keyboard", accessibilityDescription: "快捷键")
+                        ?? NSImage(named: NSImage.preferencesGeneralName)
                         ?? NSImage(named: "general")!
                 ) {
                     HotkeyPane()
