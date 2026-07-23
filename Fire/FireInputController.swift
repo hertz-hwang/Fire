@@ -20,6 +20,12 @@ class FireInputController: IMKInputController {
     private var _lastPunctuationKeyCode: UInt16? = nil
     var _lastCommittedText = ""
     private var _lastCommittedRange: NSRange?
+    private var _lastInputIsNumber = false
+    private var _lastInputText = ""
+    // 待二次确认删除的候选词，非 nil 时候选窗处于删除确认态
+    private var _pendingDeleteCandidate: Candidate?
+    // 组词模式下当前组合的字数，非 nil 时处于"快速加词"组词态
+    private var _combineCount: Int?
     internal var inputMode: InputMode {
         get { Fire.shared.inputMode }
         set(value) { Fire.shared.inputMode = value }
@@ -100,6 +106,15 @@ class FireInputController: IMKInputController {
             client()?.setMarkedText(text, selectionRange: selectionRange(), replacementRange: replacementRange())
         }
     }
+
+    // 组词模式下用一个空格占位标记合成串，保持合成态，确保方向键等被输入法消费而不传给应用
+    private func markCombineText() {
+        let attrs = mark(forStyle: kTSMHiliteConvertedText, at: NSRange(location: NSNotFound, length: 0))
+        if let attributes = attrs as? [NSAttributedString.Key: Any] {
+            let text = NSAttributedString(string: " ", attributes: attributes)
+            client()?.setMarkedText(text, selectionRange: selectionRange(), replacementRange: replacementRange())
+        }
+    }
     
     private func getPreviousText(_ count: Int = 1) -> String {
         // 中文输入模式下，markedRange 会跟随输入字符变化
@@ -140,6 +155,43 @@ class FireInputController: IMKInputController {
         }
         if let handled = undoCommitHotkeyHandler(event: event) {
             return handled
+        }
+        // Ctrl+Shift+数字：从词库删除对应候选词
+        // 按住 Shift 时数字键的 charactersIgnoringModifiers 会变成符号(如 Shift+1 -> !)，
+        // 无法用 Int 解析，这里改用 keyCode 映射数字
+        let digitByKeyCode: [UInt16: Int] = [
+            UInt16(kVK_ANSI_1): 1, UInt16(kVK_ANSI_2): 2, UInt16(kVK_ANSI_3): 3,
+            UInt16(kVK_ANSI_4): 4, UInt16(kVK_ANSI_5): 5, UInt16(kVK_ANSI_6): 6,
+            UInt16(kVK_ANSI_7): 7, UInt16(kVK_ANSI_8): 8, UInt16(kVK_ANSI_9): 9
+        ]
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers == [.control, .shift],
+           let deleteIndex = digitByKeyCode[event.keyCode],
+           deleteIndex <= _candidates.count {
+            let target = _candidates[deleteIndex - 1]
+            if target.type != .placeholder {
+                NSLog("hotkey: control + shift + \(deleteIndex), delete confirm: \(target.text)")
+                if _pendingDeleteCandidate == target {
+                    // 再按一次同一组合键 = 确认删除
+                    confirmDelete(target)
+                } else {
+                    // 首次按下或切换删除目标，进入二次确认态
+                    _pendingDeleteCandidate = target
+                    showDeleteConfirm(target)
+                }
+            }
+            return true
+        }
+        // Ctrl+= ：在无正在输入原码时进入"快速加词"组词模式
+        if modifiers == .control, event.keyCode == UInt16(kVK_ANSI_Equal), _originalString.isEmpty {
+            if Fire.shared.recentCommittedTexts.count >= 2 {
+                _combineCount = 2
+                markCombineText()
+                showCombinePreview()
+            } else {
+                Utils.shared.showMessage("请先输入至少两个字，再按 Ctrl+= 组词")
+            }
+            return true
         }
         guard let charsIgnoring = event.charactersIgnoringModifiers else {
             return nil
@@ -221,6 +273,125 @@ class FireInputController: IMKInputController {
         return table[k].map { UInt16($0) }
     }
 
+    // 在候选窗中以 placeholder 形式展示删除确认提示
+    private func showDeleteConfirm(_ target: Candidate) {
+        let tip = Candidate(
+            code: _originalString,  // code 设为原码，避免 getShownCode 显示多余的"()"
+            text: "",               // text 置空，防止鼠标点按候选时误插入文字
+            type: .placeholder,
+            label: "确认删除「\(target.text)」? Enter键确认， Esc键取消"
+        )
+        CandidatesWindow.shared.setCandidates(
+            (list: [tip], hasPrev: false, hasNext: false),
+            originalString: _originalString,
+            topLeft: getOriginPoint()
+        )
+    }
+
+    // 确认删除并恢复正常候选窗
+    private func confirmDelete(_ target: Candidate) {
+        NSLog("[FireInputController] confirmDelete: \(target.text)")
+        DictManager.shared.deleteCandidate(target)
+        Utils.shared.showMessage("已删除「\(target.text)」")
+        _pendingDeleteCandidate = nil
+        self.curPage = 1
+        self.refreshCandidatesWindow()
+    }
+
+    // 删除确认态下的按键处理：回车确认、Esc 取消、组合键透传、其它键取消并照常处理
+    private func deleteConfirmHandler(event: NSEvent) -> Bool? {
+        guard let pending = _pendingDeleteCandidate else { return nil }
+        // 放行 flagsChanged(如 shift 切中英文)，相关清理由 clean() 完成
+        if event.type == .flagsChanged { return nil }
+        // 回车确认删除
+        if event.keyCode == kVK_Return {
+            confirmDelete(pending)
+            return true
+        }
+        // 组合键(Ctrl+Shift+数字)透传给 hotkeyHandler 处理：同号确认、换号切目标
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers == [.control, .shift] {
+            return nil
+        }
+        // 其余按键一律取消确认，恢复真实候选
+        _pendingDeleteCandidate = nil
+        self.refreshCandidatesWindow()
+        // Esc 仅取消，不清空已输入的原码
+        if event.keyCode == kVK_Escape {
+            return true
+        }
+        // 其它键取消后继续走正常处理链
+        return nil
+    }
+
+    // 组词模式当前合成的文本(最近 count 个上屏项按原顺序拼接)
+    private func combineText(_ count: Int) -> String {
+        return Fire.shared.recentCommittedTexts.suffix(count).joined()
+    }
+
+    // 在候选窗中以 placeholder 形式预览组词结果及其五笔码
+    private func showCombinePreview() {
+        guard let count = _combineCount else { return }
+        let text = combineText(count)
+        // 五笔码显示在候选窗原码区；code 与 origin 保持一致以避免出现多余的"()"
+        let codeStr = DictManager.shared.makeWubiWordCode(for: text) ?? "无法取码"
+        let tip = Candidate(
+            code: codeStr,
+            text: "",
+            type: .placeholder,
+            label: "【\(text)】，←键增字， →键减字，Enter键确认， Esc键取消"
+        )
+        CandidatesWindow.shared.setCandidates(
+            (list: [tip], hasPrev: false, hasNext: false),
+            originalString: codeStr,
+            topLeft: getOriginPoint()
+        )
+    }
+
+    // 确认组词：生成五笔码并写入用户词库
+    private func confirmCombine() {
+        guard let count = _combineCount else { return }
+        let text = combineText(count)
+        if let code = DictManager.shared.makeWubiWordCode(for: text) {
+            _ = DictManager.shared.prependCandidate(
+                candidate: Candidate(code: code, text: text, type: .user))
+            NotificationQueue.default.enqueue(
+                Notification(name: DictManager.userDictUpdated), postingStyle: .whenIdle)
+            Utils.shared.showMessage("已添加新词【\(text)】\(code)")
+        } else {
+            Utils.shared.showMessage("无法为【\(text)】生成五笔码")
+        }
+        // clean() 会清空 _originalString 触发 markText 清除组词占位的合成串，并重置 _combineCount、关闭候选窗
+        clean()
+    }
+
+    // 组词模式下的按键处理：Left 增、Right 减、Enter 确认、Esc 退出，其它键退出后照常处理
+    private func combineHandler(event: NSEvent) -> Bool? {
+        guard let count = _combineCount else { return nil }
+        if event.type == .flagsChanged { return nil }
+        let bufCount = Fire.shared.recentCommittedTexts.count
+        switch Int(event.keyCode) {
+        case kVK_LeftArrow:
+            _combineCount = min(count + 1, bufCount)
+            showCombinePreview()
+            return true
+        case kVK_RightArrow:
+            _combineCount = max(count - 1, 2)
+            showCombinePreview()
+            return true
+        case kVK_Return:
+            confirmCombine()
+            return true
+        case kVK_Escape:
+            clean()
+            return true
+        default:
+            // 其它键退出组词模式后继续走正常处理链
+            clean()
+            return nil
+        }
+    }
+
      func flagChangedHandler(event: NSEvent) -> Bool? {
          NSLog("[FireInputController] flagChangedHandler")
         // 只有在shift keyup时，才切换中英文输入, 否则会导致shift+[a-z]大写的功能失效
@@ -234,10 +405,22 @@ class FireInputController: IMKInputController {
             return true
         }
         // 监听.flagsChanged事件只为切换中英文，其它情况不处理需要返回 false 以避免快捷键不生效
+        // 放行规则：先把 Shift / CapsLock 这类不属于"快捷键修饰键"的位剔除，再要求剩余位
+        //   - 为空(无修饰键，如 a、,、.)，或
+        //   - 恰好是 .numericPad|.function (方向键、用于翻页)
+        // 其它情况（含 Cmd/Ctrl/Option/单独 .function 的 F 键、单独 .numericPad 的数字小键盘等）
+        // 全部交给系统处理，避免无谓的 handler 链空跑(predictorHandler 会读 client 的 IPC 状态)。
+        // Shift / CapsLock 必须放行的原因：
+        //   - Shift+标点是常规中文标点输入路径(Shift+1=! 等)，需要继续走到 punctuationKeyHandler 完成全角转换
+        //   - Shift+字母由 charKeyHandler 处理(commit 0b51393 起，大写字母会被附加到原码而不直接上屏)
+        // .deviceIndependentFlagsMask 用来过滤低位"设备相关"标志，避免极少数键盘场景下的脏数据误判。
+        // 关联 issue #149 #152，回归源 commit 2d66064。
+        let modifiers = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.shift, .capsLock])
         if event.type == .flagsChanged || (
-            event.modifierFlags != .init(rawValue: 0)
-            // 输入法需要处理方向键做翻页，所以需要排除方向键
-            && event.modifierFlags != .init(arrayLiteral: .numericPad, .function)
+            !modifiers.isEmpty
+            && modifiers != .init(arrayLiteral: .numericPad, .function)
         ) {
             let onlyShift = event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .shift
             // 标点顶屏: 有输入码时，shift+标点键需要继续传递给 punctuationKeyHandler 处理
@@ -329,6 +512,15 @@ class FireInputController: IMKInputController {
         _lastInputIsAlphanumeric = false
         _lastPunctuationKeyCode = nil
 
+        // 在数字后输入“：”，自动转为英文半角冒号
+        if Defaults[.enableColonAfterNumber] && event.keyCode == kVK_ANSI_Semicolon && _lastInputIsNumber {
+            insertText(":")
+            _lastInputIsNumber = false
+            return true
+        }
+        _lastInputIsNumber = false
+
+        _lastInputText = getPreviousText()
         NSLog("[FireInputController] predictorHandler range, selectionRange: \(selectionRange()), replacementRange: \(replacementRange()), client.selectedRange: \(client().selectedRange()), client.markedRange: \(client().markedRange())")
 
         return nil
@@ -453,10 +645,18 @@ class FireInputController: IMKInputController {
         return nil
     }
 
+    private func isTempEnModeActive() -> Bool {
+        !Defaults[.disableTempEnMode]
+            && !_originalString.isEmpty
+            && _originalString.first == DictManager.shared.tempEnTriggerPunctuation
+    }
+
     private func enterKeyHandler(event: NSEvent) -> Bool? {
         if event.keyCode == kVK_Return && _originalString.count > 0 {
             if _originalString.first == "`" {
                 clean()
+            } else if isTempEnModeActive(), let first = _candidates.first {
+                insertCandidate(first)
             } else {
                 insertText(_originalString)
             }
@@ -476,7 +676,7 @@ class FireInputController: IMKInputController {
         return nil
     }
 
-    private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
+private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         guard inputMode == .zhhans else { return nil }
         guard Defaults[.codeMode] != .pinyin else { return nil }
         if event.keyCode == kVK_ANSI_Grave {
@@ -489,6 +689,43 @@ class FireInputController: IMKInputController {
             }
         }
         return nil
+    }
+
+    private func extraCandidateKeyHandler(event: NSEvent) -> Bool? {
+        guard inputMode == .zhhans,
+              _originalString.count > 0,
+              !isTempEnModeActive(),
+              let string = event.characters else {
+            return nil
+        }
+
+        let mode = Defaults[.extraCandidateSelectKeys]
+        guard mode != .disabled else { return nil }
+
+        let index: Int?
+        switch mode {
+        case .semicolonQuote:
+            switch string {
+            case ";": index = 1
+            case "'": index = 2
+            default: index = nil
+            }
+        case .commaPeriod:
+            switch string {
+            case ",": index = 1
+            case ".": index = 2
+            default: index = nil
+            }
+        case .disabled:
+            index = nil
+        }
+
+        guard let index = index, index < _candidates.count else {
+            return nil
+        }
+
+        insertCandidate(_candidates[index])
+        return true
     }
 
     private func punctuationKeyHandler(event: NSEvent) -> Bool? {
@@ -531,7 +768,15 @@ class FireInputController: IMKInputController {
 
         // 如果输入的字符是标点符号，转换标点符号为中文符号
         if inputMode == .zhhans, let result = PunctuationConversion.shared.conversion(punctuationInput) {
-            insertText(result)
+            if _originalString.count > 0,
+               !isTempEnModeActive(),
+               let first = _candidates.first,
+               first.type != .placeholder {
+                insertCandidate(first)
+                insertText(result)
+            } else {
+                insertText(result)
+            }
             return true
         }
         return nil
@@ -563,6 +808,8 @@ class FireInputController: IMKInputController {
         CandidatesWindow.shared.inputController = self
 
         let handler = Utils.shared.processHandlers(handlers: [
+            deleteConfirmHandler,
+            combineHandler,
             hotkeyHandler,
             flagChangedHandler,
             enModeHandler,
@@ -576,6 +823,7 @@ class FireInputController: IMKInputController {
             enterKeyHandler,
             spaceKeyHandler,
             reverseLookupKeyHandler,
+            extraCandidateKeyHandler,
             punctuationKeyHandler
         ])
         return handler(event) ?? false
@@ -662,6 +910,10 @@ class FireInputController: IMKInputController {
     }
 
     override func selectionRange() -> NSRange {
+        if _combineCount != nil {
+            // 组词模式下为 1 长度的占位合成串，与 markCombineText 保持一致
+            return NSRange(location: 0, length: 1)
+        }
         if Defaults[.showCodeInWindow] {
             return NSRange(location: 0, length: min(1, _originalString.count))
         }
@@ -672,6 +924,14 @@ class FireInputController: IMKInputController {
     }
 
     func insertCandidate(_ candidate: Candidate) {
+        Fire.shared.lastCommittedText = candidate.text
+        // 记录中文候选词上屏，供"快速加词"组词使用
+        if candidate.type != .placeholder, candidate.text.contains(where: { $0.isChineseChar }) {
+            Fire.shared.recentCommittedTexts.append(candidate.text)
+            if Fire.shared.recentCommittedTexts.count > 20 {
+                Fire.shared.recentCommittedTexts.removeFirst()
+            }
+        }
         insertText(candidate.text)
         let appBundleId = client()?.bundleIdentifier() ?? ""
         let notification = Notification(
@@ -714,6 +974,7 @@ class FireInputController: IMKInputController {
             let value = NSAttributedString(string: newText)
             client()?.insertText(value, replacementRange: replacementRange())
             _lastInputIsAlphanumeric = newText.last.map { $0.isASCII && ($0.isNumber || $0.isLetter) } ?? false
+            _lastInputIsNumber = newText.last != nil && Int(String(newText.last!)) != nil
             _lastPunctuationKeyCode = nil
             _lastCommittedText = newText
             if let insertionLocation = insertionLocation {
@@ -835,6 +1096,8 @@ class FireInputController: IMKInputController {
         cancelAutoCommit()
         _originalString = ""
         curPage = 1
+        _pendingDeleteCandidate = nil
+        _combineCount = nil
         CandidatesWindow.shared.close()
     }
 
@@ -851,5 +1114,12 @@ class FireInputController: IMKInputController {
         _lastCommittedText = ""
         _lastCommittedRange = nil
         return true
+    }
+}
+
+extension Character {
+    // 是否为 CJK 统一表意文字(常用汉字区)
+    var isChineseChar: Bool {
+        unicodeScalars.allSatisfy { (0x4E00...0x9FFF).contains($0.value) }
     }
 }

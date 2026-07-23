@@ -3,89 +3,97 @@ name: build installer.pkg
 on:
   workflow_dispatch:
     inputs: 
-      release:
-        description: 'release version'
+      version:
+        description: "版本号 (如 v0.28.0)"
         required: true
-        default: 'v1.0.2'
+        type: string
+      release_notes:
+        description: "版本描述 (Markdown，可选)"
+        required: false
+        type: string
+        default: ""
+      ref:
+        description: "Git Ref (分支/标签/SHA，留空使用默认分支)"
+        required: false
+        type: string
+        default: ""
+      code_sign:
+        description: "Code Sign"
+        required: true
+        type: choice
+        options:
+          - enable
+          - disable
   pull_request:
     types: [closed]
 
 jobs:
-  create_release:
+  changelog:
     runs-on: ubuntu-latest
     permissions:
       contents: write # 创建 release 需要此权限
     if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'master' || github.event_name == 'workflow_dispatch'
+    outputs:
+      skipped: ${{ github.event_name == 'workflow_dispatch' && 'false' || steps.changelog.outputs.skipped }}
+      next_version: ${{ github.event_name == 'workflow_dispatch' && inputs.version || steps.changelog.outputs.tag }}
+      changelog_html: ${{ steps.create_html.outputs.html }}
+      changelog: ${{ github.event_name == 'workflow_dispatch' && inputs.release_notes || steps.changelog.outputs.clean_changelog }}
+      ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || steps.checkout.outputs.ref }}
     steps:
       - uses: actions/checkout@v4
+        id: checkout
+        if: github.event_name != 'workflow_dispatch' || inputs.release_notes == ''
         with:
-          submodules: true
+          submodules: false
 
       - name: Conventional Changelog Action
         id: changelog
+        if: github.event_name != 'workflow_dispatch' || inputs.release_notes == ''
         uses: TriPSs/conventional-changelog-action@v3
         with:
           github-token: ${{ secrets.github_token }}
           skip-commit: "true"
           output-file: "false"
       
-      - name: Create Release
-        uses: actions/create-release@v1
-        id: create_release
-        if: steps.changelog.outputs.skipped == 'false'
+      - name: combine donation and changelog
+        id: combine_text
         env:
-          GITHUB_TOKEN: ${{ secrets.github_token }}
-        with:
-          tag_name: ${{ steps.changelog.outputs.tag }}
-          release_name: ${{ steps.changelog.outputs.tag }}
-          body: ${{ steps.changelog.outputs.clean_changelog }}
-
-      - name: write update url to temp
-        env:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          CHANGELOG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_notes || steps.changelog.outputs.clean_changelog }}
         run: |
-          mkdir tmp
-          echo "${upload_url}" > tmp/upload_url
-      
+          {
+            echo "text<<ENDOFTEXT"
+            echo "$CHANGELOG"
+            echo ''
+            echo '### 💰 打赏支持'
+            echo '如果本项目对你有帮助，欢迎[请作者喝杯咖啡](https://github.com/qwertyyb/Fire#-打赏支持)，你的支持是持续更新的动力~'
+            echo ''
+            echo '<img alt="微信赞赏码" src="https://cdn.qwertyyb.cn/static/wx.jpg" width="200">'
+            echo "ENDOFTEXT"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: lifepal/markdown-to-html@v1.2
         id: create_html
         with:
-          text: ${{ steps.changelog.outputs.clean_changelog }}
-      
-      - name: write changelog to temp
-        env:
-          changelog_html: ${{ steps.create_html.outputs.html }}
-        run: echo "$changelog_html" > tmp/changelog_html
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tmp
-          path: ./tmp/
-          retention-days: 2
+          text: ${{ steps.combine_text.outputs.text }}
 
   build_binary:
-    runs-on: macos-13
-    needs: create_release
+    runs-on: macos-latest
+    needs: changelog
 
     env:
-      USE_CODE_SIGN: ${{ !inputs.disable_sign && github.actor_id == github.repository_owner_id && 'enable' || 'disable' }}
+      USE_CODE_SIGN: ${{ inputs.code_sign == 'enable' && github.actor_id == github.repository_owner_id && 'enable' || 'disable' }}
+      NEXT_VERSION: ${{ needs.changelog.outputs.next_version }}
+
+    if: needs.changelog.outputs.skipped == 'false'
 
     steps:
     - uses: actions/checkout@v4
       with:
         submodules: true
+        ref: ${{ needs.changelog.outputs.ref }}
 
-    - name: checkout tag
-      run: |
-        git checkout master
-        git pull
-        git status
-        version=$(git describe --tags `git rev-list --tags --max-count=1`)
-        echo $version
-        git checkout $version
-
-    - name: switch xcode version
-      run: sudo xcode-select --switch /Applications/Xcode_14.3.1.app
+    # - name: switch xcode version
+    #   run: sudo xcode-select --switch /Applications/Xcode_14.3.1.app
     
     - name: import application certificate
       id: keychain
@@ -117,22 +125,11 @@ jobs:
         apple_id_password: ${{ secrets.APPLE_ID_PASSWORD }}
         team_id: ${{ secrets.TEAM_ID }}
       run: ./scripts/c_notarize_installer.sh
-    
-    - uses: actions/download-artifact@v4
-      with:
-        name: tmp
-        path: ./tmp
-
-    - name: load changelog to env
-      id: load_changelog
-      run: |
-        changelog=`cat tmp/changelog_html | xargs`
-        echo "changelog_html=${changelog}" >> $GITHUB_OUTPUT
 
     - name: generate appcast.xml
       env:
         sparkle_key: ${{ secrets.sparkle_key }}
-        update_notes: ${{ steps.load_changelog.outputs.changelog_html }}
+        update_notes: ${{ needs.changelog.outputs.changelog_html }}
       run: ./scripts/d_build_appcast.sh
 
     - name: gather artifact
@@ -144,70 +141,71 @@ jobs:
         path: ./dist/
         retention-days: 7
 
-  upload_publish:
+  create_release:
     runs-on: ubuntu-latest
+    needs: [changelog, build_binary]
+    environment: release
     permissions:
       contents: write # 创建 release 需要此权限
-    needs: build_binary
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
 
-    - uses: actions/download-artifact@v4
-      with:
-        name: dist
-        path: ./dist
-
-    - uses: actions/download-artifact@v4
-      with:
-        name: tmp
-        path: ./tmp
+    if: needs.changelog.outputs.skipped == 'false'
     
-    - name: load update url
-      id: get_upload_url
-      run: |
-        value=`cat tmp/upload_url`
-        echo "upload_url=${value}" >> $GITHUB_OUTPUT
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          ref: gh-pages
 
-    - name: Upload Release Asset(installer.pkg)
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.get_upload_url.outputs.upload_url }}
-        asset_path: ./dist/FireInstaller.pkg
-        asset_name: FireInstaller.pkg
-        asset_content_type: application/octet-stream
+      - name: Create Release
+        uses: actions/create-release@v1
+        id: create_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.github_token }}
+        with:
+          tag_name: ${{ needs.changelog.outputs.next_version }}
+          release_name: ${{ needs.changelog.outputs.next_version }}
+          body: ${{ needs.changelog.outputs.changelog }}
 
-    - name: Upload Release Asset(installer.zip)
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.get_upload_url.outputs.upload_url }}
-        asset_path: ./dist/FireInstaller.zip
-        asset_name: FireInstaller.zip
-        asset_content_type: application/zip
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: ./dist
 
-    - name: Upload Release Asset(Fire.zip)
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.get_upload_url.outputs.upload_url }}
-        asset_path: ./dist/Fire.zip
-        asset_name: Fire.zip
-        asset_content_type: application/zip
+      - name: Upload Release Asset(installer.pkg)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./dist/FireInstaller.pkg
+          asset_name: FireInstaller.pkg
+          asset_content_type: application/octet-stream
 
-    - name: commit appcast.xml to gh-pages branch
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git checkout .
-        git fetch
-        git checkout gh-pages
-        mv dist/appcast.xml ./appcast.xml
-        git add appcast.xml
-        git commit -m "feat: 更新appcast.xml"
-        git push origin gh-pages
+      - name: Upload Release Asset(installer.zip)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./dist/FireInstaller.zip
+          asset_name: FireInstaller.zip
+          asset_content_type: application/zip
+
+      - name: Upload Release Asset(Fire.zip)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./dist/Fire.zip
+          asset_name: Fire.zip
+          asset_content_type: application/zip
+
+      - name: commit appcast.xml to gh-pages branch
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          mv dist/appcast.xml ./appcast.xml
+          git add appcast.xml
+          git commit -m "feat: 更新appcast.xml ${{ needs.changelog.outputs.next_version }} build ${{ needs.changelog.outputs.ref }}"
+          git push origin gh-pages

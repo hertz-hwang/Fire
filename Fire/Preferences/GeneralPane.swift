@@ -23,6 +23,7 @@ struct GeneralPane: View {
     @Default(.emptyCodeDirectDelay) private var emptyCodeDirectDelay
     @Default(.enablePunctuationCandidateSelect) private var enablePunctuationCandidateSelect
     @Default(.jianQuanMode) private var jianQuanMode
+    @Default(.extraCandidateSelectKeys) private var extraCandidateSelectKeys
     @Default(.inputModeTipWindowType) private var inputModeTipWindowType
     @Default(.zKeyQuery) private var zKeyQuery
     @Default(.toggleInputModeKey) private var toggleInputModeKey
@@ -124,6 +125,14 @@ struct GeneralPane: View {
                             }
                             HStack {
                                 Toggle("启用;键次选/引号三选", isOn: $enablePunctuationCandidateSelect)
+                                Spacer(minLength: 20)
+                            }
+                            HStack {
+                                Picker("二三候选词额外选择键", selection: $extraCandidateSelectKeys) {
+                                    Text("禁用").tag(ExtraCandidateSelectKeys.disabled)
+                                    Text(";'").tag(ExtraCandidateSelectKeys.semicolonQuote)
+                                    Text(",.").tag(ExtraCandidateSelectKeys.commaPeriod)
+                                }
                                 Spacer(minLength: 20)
                             }
                             HStack {
