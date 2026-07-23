@@ -18,6 +18,12 @@ enum CandidatesDirection: Int, Decodable, Encodable, Defaults.Serializable {
     case horizontal
 }
 
+enum ExtraCandidateSelectKeys: String, Codable, Defaults.Serializable {
+    case disabled
+    case semicolonQuote
+    case commaPeriod
+}
+
 enum InputModeTipWindowType: Int, Decodable, Encodable, Defaults.Serializable {
     case followInput
     case centerScreen
@@ -104,6 +110,10 @@ extension Defaults.Keys {
         default: false
     )
     static let candidateCount = Key<Int>("candidateCount", default: 5)
+    static let extraCandidateSelectKeys = Key<ExtraCandidateSelectKeys>(
+        "extraCandidateSelectKeys",
+        default: .semicolonQuote
+    )
     static let codeMode = Key<CodeMode>("codeMode", default: CodeMode.wubiPinyin)
     static let jianQuanMode = Key<JianQuanMode>("jianQuanMode", default: JianQuanMode.normal)
 
@@ -138,6 +148,8 @@ extension Defaults.Keys {
     static let customPunctuationSettings = Key<[String: String]>("customPunctuationSettings", default: punctuation)
     // 数字/字母后输入标点自动转为英文标点；连续输入两次相同标点则转为中文标点（如「3..」→「3。」）
     static let enableDotAfterNumber = Key<Bool>("enableDotAfterNumber", default: true)
+    // 数字后输入"："自动转为":"
+    static let enableColonAfterNumber = Key<Bool>("enableColonAfterNumber", default: true)
     static let enablePunctuationTopScreen = Key<Bool>("enablePunctuationTopScreen", default: false)
     // 在中文和英文之间插入空格，在中文输入模式下生效，也可在英文模式下输入英文再切到中文输入模式下输入中文时生效
     // 从中文模式输入中文后再切到英文输入模式下输入英文时生效

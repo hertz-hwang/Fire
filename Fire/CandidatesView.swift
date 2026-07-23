@@ -101,10 +101,11 @@ struct CandidatesView: View {
         disabled: Bool,
         eventName: Notification.Name
     ) -> some View {
+        let size = CGFloat(themeConfig[colorScheme].fontSize) * 0.5
         return Image(imageName)
             .renderingMode(.template)
             .resizable()
-            .frame(width: 10, height: 10, alignment: .center)
+            .frame(width: size, height: size, alignment: .center)
             .rotationEffect(Angle(degrees: direction == CandidatesDirection.horizontal ? 0 : -90), anchor: .center)
             .onTapGesture {
                 if disabled { return }

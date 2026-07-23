@@ -14,6 +14,7 @@ struct PunctuationPane: View {
     @Default(.punctuationMode) private var punctuationMode
     @Default(.customPunctuationSettings) private var customPunctuationSettings
     @Default(.enableDotAfterNumber) private var enableDotAfterNumber
+    @Default(.enableColonAfterNumber) private var enableColonAfterNumber
     @Default(.enablePunctuationTopScreen) private var enablePunctuationTopScreen
     var body: some View {
         Settings.Container(contentWidth: 450) {
@@ -28,6 +29,9 @@ struct PunctuationPane: View {
                 }
                 HStack {
                     Toggle("数字/字母后标点自动转为英文（连按两次转回中文）", isOn: $enableDotAfterNumber)
+                }
+                HStack {
+                    Toggle("数字后输入 “：”（全角） 自动转为 “:”（半角），适用于 12:45 时间场景", isOn: $enableColonAfterNumber)
                 }
                 HStack {
                     Toggle("标点顶屏", isOn: $enablePunctuationTopScreen)

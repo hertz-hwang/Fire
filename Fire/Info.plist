@@ -20,7 +20,14 @@
 	<string>v0.17.2</string>
 	<key>CFBundleURLTypes</key>
 	<array>
-		<dict/>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.qwertyyb.inputmethod.Fire.theme</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>fire</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>20230918181732</string>

@@ -5,8 +5,6 @@ source "$PROJECT_ROOT/scripts/common.sh"
 
 INSTALLER_ROOT="$EXPORT_PATH/installer"
 
-Version=`date "+%Y%m%d%H%M%S"`
-
 if [[ $EXPORT_PATH == "" ]]
 then
     echo "No Export Path Specificy"
@@ -28,9 +26,9 @@ echo "INSTALL_LOCATION=${INSTALL_LOCATION}"
 if [[ $USE_CODE_SIGN == "disable" ]]
 then
     echo "build installer without signing"
-    pkgbuild --info "${PROJECT_ROOT}/package/PackageInfo" --root "${INSTALLER_ROOT}" --component-plist "${PROJECT_ROOT}/package/component.plist" --identifier "${BUNDLE_IDENTIFIER}" --version "${Version}" --install-location "${INSTALL_LOCATION}" --scripts "${PROJECT_ROOT}/package/scripts" "$EXPORT_INSTALLER" || { echo "build installer failed"; exit 1; }
+    pkgbuild --info "${PROJECT_ROOT}/package/PackageInfo" --root "${INSTALLER_ROOT}" --component-plist "${PROJECT_ROOT}/package/component.plist" --identifier "${BUNDLE_IDENTIFIER}" --version "${BUILD_VERSION}" --install-location "${INSTALL_LOCATION}" --scripts "${PROJECT_ROOT}/package/scripts" "$EXPORT_INSTALLER" || { echo "build installer failed"; exit 1; }
 else
-    pkgbuild --info "${PROJECT_ROOT}/package/PackageInfo" --root "${INSTALLER_ROOT}" --component-plist "${PROJECT_ROOT}/package/component.plist" --identifier "${BUNDLE_IDENTIFIER}" --version "${Version}" --install-location "${INSTALL_LOCATION}" --scripts "${PROJECT_ROOT}/package/scripts" --sign "Developer ID Installer: Yongbang Yang" "$EXPORT_INSTALLER" || { echo "build installer failed"; exit 1; }
+    pkgbuild --info "${PROJECT_ROOT}/package/PackageInfo" --root "${INSTALLER_ROOT}" --component-plist "${PROJECT_ROOT}/package/component.plist" --identifier "${BUNDLE_IDENTIFIER}" --version "${BUILD_VERSION}" --install-location "${INSTALL_LOCATION}" --scripts "${PROJECT_ROOT}/package/scripts" --sign "Developer ID Installer: Yongbang Yang" "$EXPORT_INSTALLER" || { echo "build installer failed"; exit 1; }
 fi
 
 # pack zip for update
