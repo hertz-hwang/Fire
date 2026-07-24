@@ -21,6 +21,10 @@ func getShownCode(candidate: Candidate, origin: String) -> String {
     return ""
 }
 
+func getCharDivInfos(text: String) -> [CharDivInfo] {
+    text.map { String($0) }.compactMap { CharDivTable.shared.lookup($0) }
+}
+
 struct CandidateView: View {
     var candidate: Candidate
     var index: Int
@@ -65,6 +69,16 @@ struct CandidateView: View {
                 ]
             )
         }
+        .background(
+            HoverTracking { hovering, screenPoint in
+                if hovering {
+                    let infos = getCharDivInfos(text: candidate.text)
+                    CharDivTipWindow.shared.show(infos, at: screenPoint)
+                } else {
+                    CharDivTipWindow.shared.hide()
+                }
+            }
+        )
     }
 }
 

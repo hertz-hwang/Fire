@@ -7,12 +7,17 @@
 //
 
 import SwiftUI
+import AppKit
 import Settings
 import Defaults
 
 struct ThesaurusPane: View {
     @Default(.wbTablePath) private var wbTablePath
     @Default(.pyTablePath) private var pyTablePath
+    @Default(.charDivTablePath) private var charDivTablePath
+    @Default(.charDivRootFontName) private var charDivRootFontName
+
+    private let availableFontFamilies = NSFontManager.shared.availableFontFamilies
 
     private func selectFile() -> String? {
         let openPanel = NSOpenPanel()
@@ -75,6 +80,37 @@ struct ThesaurusPane: View {
                                             }
                                         }
                                 }
+                                Spacer()
+                            }
+                            HStack {
+                                Group {
+                                    Text("拆分表: ")
+                                    Text(charDivTablePath.isEmpty ? "未设置（候选词悬浮拆分提示）" : charDivTablePath)
+                                        .lineLimit(1)
+                                        .padding(.horizontal, 6)
+                                        .truncationMode(.middle)
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.white)
+                                        .background(Color(.displayP3, red: 0.5, green: 0.5, blue: 0.5, opacity: 1))
+                                        .cornerRadius(4)
+                                        .onTapGesture {
+                                            if let path = selectFile() {
+                                                Defaults[.charDivTablePath] = path
+                                                CharDivTable.shared.reload()
+                                            }
+                                        }
+                                }
+                                Spacer()
+                            }
+                            HStack {
+                                Text("拆分字根字体: ")
+                                Picker("", selection: $charDivRootFontName) {
+                                    Text("系统默认").tag("")
+                                    ForEach(availableFontFamilies, id: \.self) { family in
+                                        Text(family).tag(family)
+                                    }
+                                }
+                                .frame(width: 200)
                                 Spacer()
                             }
                         }

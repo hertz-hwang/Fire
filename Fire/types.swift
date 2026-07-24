@@ -182,6 +182,13 @@ extension Defaults.Keys {
         "pyTableURL",
         default: Bundle.main.resourceURL?.appendingPathComponent("py_table.txt").path
             ?? "")
+    // 拆分表，用于候选词悬浮提示拆分信息
+    static let charDivTablePath = Key<String>(
+        "charDivTableURL",
+        default: Bundle.main.resourceURL?.appendingPathComponent("ll_div.txt").path
+            ?? "")
+    // 悬浮提示窗口中"拆分字根"文字使用的字体，空表示使用系统默认字体
+    static let charDivRootFontName = Key<String>("charDivRootFontName", default: "")
 
     // 统计配置
     static let enableStatistics = Key<Bool>("enableStatistics", default: true)
