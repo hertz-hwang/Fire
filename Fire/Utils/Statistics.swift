@@ -91,6 +91,13 @@ class Statistics {
 
     static let updated = Notification.Name("Statistics.updated")
 
+    // 每次上屏都会写一条记录，复用 formatter，避免每次插入都新建 DateFormatter
+    private static let insertDateFormatter: DateFormatter = {
+        let format = DateFormatter()
+        format.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
+        return format
+    }()
+
     init() {
         NSLog("[Statistics] init")
         NotificationCenter.default
@@ -99,7 +106,7 @@ class Statistics {
     }
 
     @objc func listener(notification: Notification) {
-        NSLog("[Statistics] listener: \(notification)")
+        fireLog("[Statistics] listener: \(notification)")
         guard let candidate = notification.userInfo?["candidate"] as? Candidate else {
             return
         }
@@ -111,8 +118,7 @@ class Statistics {
         let sql = "insert into data(text, type, code, createdAt, appBundleId) values (:text, :type, :code, :createdAt, :appBundleId)"
         var insertStatement: OpaquePointer?
         if sqlite3_prepare_v2(database, sql, -1, &insertStatement, nil) == SQLITE_OK {
-            let format = DateFormatter()
-            format.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
+            let format = Statistics.insertDateFormatter
             sqlite3_bind_text(insertStatement,
                               sqlite3_bind_parameter_index(insertStatement, ":text"),
                               candidate.text, -1, SQLITE_TRANSIENT)

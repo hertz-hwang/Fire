@@ -40,7 +40,7 @@ class FireInputController: IMKInputController {
     )
 
     deinit {
-        NSLog("[FireInputController] deinit")
+        fireLog("[FireInputController] deinit")
         clean()
     }
 
@@ -69,7 +69,7 @@ class FireInputController: IMKInputController {
                 self.markText()
                 return
             }
-            NSLog("[FireInputController] original changed: \(self._originalString), refresh window")
+            fireLog("[FireInputController] original changed: \(self._originalString), refresh window")
 
             // 建议mark originalString, 否则在某些APP中会有问题
             self.markText()
@@ -80,7 +80,7 @@ class FireInputController: IMKInputController {
     private var curPage: Int = 1 {
         didSet(old) {
             guard old == self.curPage else {
-                NSLog("[FireInputHandler] page changed")
+                fireLog("[FireInputHandler] page changed")
                 self.refreshCandidatesWindow()
                 return
             }
@@ -149,7 +149,7 @@ class FireInputController: IMKInputController {
     // ---- handlers begin -----
 
     private func hotkeyHandler(event: NSEvent) -> Bool? {
-        NSLog("[FireInputController] hotkeyHandler")
+        fireLog("[FireInputController] hotkeyHandler")
         if event.type == .flagsChanged {
             return nil
         }
@@ -170,7 +170,7 @@ class FireInputController: IMKInputController {
            deleteIndex <= _candidates.count {
             let target = _candidates[deleteIndex - 1]
             if target.type != .placeholder {
-                NSLog("hotkey: control + shift + \(deleteIndex), delete confirm: \(target.text)")
+                fireLog("hotkey: control + shift + \(deleteIndex), delete confirm: \(target.text)")
                 if _pendingDeleteCandidate == target {
                     // 再按一次同一组合键 = 确认删除
                     confirmDelete(target)
@@ -199,7 +199,7 @@ class FireInputController: IMKInputController {
         guard let num = Int(charsIgnoring) else { return nil }
         if event.modifierFlags == .control &&
             num > 0 && num <= _candidates.count {
-            NSLog("hotkey: control + \(num)")
+            fireLog("hotkey: control + \(num)")
             DictManager.shared.setCandidateToFirst(query: _originalString, candidate: _candidates[num-1])
             self.curPage = 1
             self.refreshCandidatesWindow()
@@ -290,7 +290,7 @@ class FireInputController: IMKInputController {
 
     // 确认删除并恢复正常候选窗
     private func confirmDelete(_ target: Candidate) {
-        NSLog("[FireInputController] confirmDelete: \(target.text)")
+        fireLog("[FireInputController] confirmDelete: \(target.text)")
         DictManager.shared.deleteCandidate(target)
         Utils.shared.showMessage("已删除「\(target.text)」")
         _pendingDeleteCandidate = nil
@@ -393,10 +393,10 @@ class FireInputController: IMKInputController {
     }
 
      func flagChangedHandler(event: NSEvent) -> Bool? {
-         NSLog("[FireInputController] flagChangedHandler")
+         fireLog("[FireInputController] flagChangedHandler")
         // 只有在shift keyup时，才切换中英文输入, 否则会导致shift+[a-z]大写的功能失效
         if !Defaults[.disableEnMode] && Utils.shared.toggleInputModeKeyUpChecker.check(event) {
-            NSLog("[FireInputController]toggle mode: \(inputMode)")
+            fireLog("[FireInputController]toggle mode: \(inputMode)")
 
             // 把当前未上屏的原始code上屏处理
             insertText(_originalString)
@@ -446,21 +446,21 @@ class FireInputController: IMKInputController {
                     return true
                 }
             }
-            NSLog("[FireInputController] flagChangedHandler no need handle")
+            fireLog("[FireInputController] flagChangedHandler no need handle")
             return false
         }
         return nil
     }
 
     private func enModeHandler(event: NSEvent) -> Bool? {
-        NSLog("[FireInputController] enModeHandler")
+        fireLog("[FireInputController] enModeHandler")
         // 英文输入模式, 不做任何处理
         if inputMode == .enUS {
             if Defaults[.enableWhitespaceBetweenZhEn],
                _originalString.isEmpty,
                let string = event.characters,
-               (try? NSRegularExpression(pattern: "^[a-zA-Z0-9]+$"))?
-                    .firstMatch(in: string, options: [], range: NSRange(location: 0, length: string.count)) != nil {
+               FireInputController.alphanumericReg?
+                    .firstMatch(in: string, options: [], range: NSRange(location: 0, length: string.utf16.count)) != nil {
                 var lastText = getPreviousText()
                 if lastText.isEmpty {
                     lastText = getPreviousTextIgnoringMarked()
@@ -521,7 +521,7 @@ class FireInputController: IMKInputController {
         _lastInputIsNumber = false
 
         _lastInputText = getPreviousText()
-        NSLog("[FireInputController] predictorHandler range, selectionRange: \(selectionRange()), replacementRange: \(replacementRange()), client.selectedRange: \(client().selectedRange()), client.markedRange: \(client().markedRange())")
+        fireLog("[FireInputController] predictorHandler range, selectionRange: \(selectionRange()), replacementRange: \(replacementRange()), client.selectedRange: \(client().selectedRange()), client.markedRange: \(client().markedRange())")
 
         return nil
     }
@@ -561,22 +561,26 @@ class FireInputController: IMKInputController {
         return nil
     }
 
+    // 每次按键都会走 charKeyHandler，正则编译一次后复用，避免热路径反复 new NSRegularExpression
+    private static let alphaReg = try? NSRegularExpression(pattern: "^[a-zA-Z]+$")
+    private static let alphanumericReg = try? NSRegularExpression(pattern: "^[a-zA-Z0-9]+$")
+
     private func charKeyHandler(event: NSEvent) -> Bool? {
         // 获取输入的字符
         let string = event.characters!
 
-        guard let reg = try? NSRegularExpression(pattern: "^[a-zA-Z]+$") else {
+        guard let reg = FireInputController.alphaReg else {
             return nil
         }
         let match = reg.firstMatch(
             in: string,
             options: [],
-            range: NSRange(location: 0, length: string.count)
+            range: NSRange(location: 0, length: string.utf16.count)
         )
 
         // 当前没有输入非字符并且之前没有输入字符,不做处理
         if  _originalString.count <= 0 && match == nil {
-            NSLog("非字符,不做处理")
+            fireLog("非字符,不做处理")
             return nil
         }
         // 当前输入的是英文字符,附加到之前
@@ -796,7 +800,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
 
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event = event else { return false }
-        NSLog("[FireInputController] handle: \(event.debugDescription)")
+        fireLog("[FireInputController] handle: \(event.debugDescription)")
 
         // 在activateServer中有把IMKInputController绑定给CandidatesWindow
         // 然而在实际运行中发现，在Safari地址栏输入部分原码后，再按shift切到英文输入模式下时，候选窗消失了，但原码没有上屏
@@ -945,7 +949,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
 
     // 往输入框插入当前字符
     func insertText(_ text: String) {
-        NSLog("insertText: %@", text)
+        fireLog("insertText: \(text)")
         if text.count > 0 {
             var newText = text
             if Defaults[.enableWhitespaceBetweenZhEn] {
@@ -958,7 +962,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                 }
                 if Utils.shared.shouldConcatWithWhitespace(lastText, text) {
                     newText = " " + newText
-                    NSLog("[FireInputController] insertCandidate should append whitespace: \(newText)")
+                    fireLog("[FireInputController] insertCandidate should append whitespace: \(newText)")
                 }
             }
             let replaceRange = replacementRange()
@@ -1092,7 +1096,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
     }
 
     func clean() {
-        NSLog("[FireInputController] clean")
+        fireLog("[FireInputController] clean")
         cancelAutoCommit()
         _originalString = ""
         curPage = 1
