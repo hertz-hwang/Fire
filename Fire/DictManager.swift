@@ -113,17 +113,23 @@ class DictManager {
                 return Int(minId)
             }
         }
-        NSLog("[Fire.getMinIdFromDictTable] errmsg: \(String(cString: sqlite3_errmsg(queryStmt)))")
+        fireLog("[Fire.getMinIdFromDictTable] errmsg: \(String(cString: sqlite3_errmsg(queryStmt)))")
         sqlite3_finalize(queryStmt)
         queryStmt = nil
         return 0
     }
 
-    private func replaceTextWithVars(_ text: String) -> String {
-        let date = Date()
+    // 日期变量替换用的 formatter，复用而非每次 new（DateFormatter 创建开销大）
+    private static let varDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy MM dd HH mm ss"
-        let arr = formatter.string(from: date).split(separator: " ")
+        return formatter
+    }()
+
+    private func replaceTextWithVars(_ text: String) -> String {
+        // 绝大多数用户词不含 {xxx} 变量，直接跳过，避免每个候选都做日期格式化 + 6 次字符串替换
+        guard text.contains("{") else { return text }
+        let arr = DictManager.varDateFormatter.string(from: Date()).split(separator: " ")
         let vars: [String: String] = [
             "{yyyy}": String(arr[0]),
             "{MM}": String(arr[1]),
@@ -136,7 +142,7 @@ class DictManager {
         vars.forEach { (key, val) in
             newText = newText.replacingOccurrences(of: key, with: val)
         }
-        print("[replaceTextWithVars] \(text), \(newText)")
+        fireLog("[replaceTextWithVars] \(text), \(newText)")
         return newText
     }
 
@@ -197,7 +203,7 @@ class DictManager {
         if query.first == tempEnTriggerPunctuation {
             return (candidates: punctuationCandidates(query: query), hasNext: false)
         }
-        NSLog("[DictManager] getCandidates origin: \(query)")
+        fireLog("[DictManager] getCandidates origin: \(query)")
         let startTime = CFAbsoluteTimeGetCurrent()
         let queryLike = getQueryLike(query)
         var candidates: [Candidate] = []
@@ -258,7 +264,7 @@ class DictManager {
             candidates.append(Candidate(code: query, text: query, type: CandidateType.placeholder))
         }
         let duration = CFAbsoluteTimeGetCurrent() - startTime
-        NSLog("[DictManager] getCandidates query: \(query) , duration: \(duration)")
+        fireLog("[DictManager] getCandidates query: \(query) , duration: \(duration)")
         return (candidates, hasNext: allCount > count)
     }
 
@@ -443,10 +449,10 @@ class DictManager {
         sqlite3_exec(database, "delete from wb_py_dict where type = '\(CandidateType.user.rawValue)'", nil, nil, nil)
         // 2. 添加用户词库
         let lines = dictContent.split(whereSeparator: \.isNewline)
-        NSLog("[DictManager] updateUserDict: \(lines)");
+        fireLog("[DictManager] updateUserDict: \(lines)");
         let candidates = lines.map { (line) -> [Candidate] in
             let strs = line.split(whereSeparator: \.isWhitespace)
-            NSLog("[DictManager] line: \(line), strs: \(strs)")
+            fireLog("[DictManager] line: \(line), strs: \(strs)")
             if strs.count <= 1 {
                 return []
             }
@@ -488,7 +494,7 @@ class DictManager {
             var texts: [String]
         }
         let candidates = getUserCandidates()
-        NSLog("[DictManager.exportUserDictToFile] candidates: \(candidates)")
+        fireLog("[DictManager.exportUserDictToFile] candidates: \(candidates)")
         var list: [UserDictLine] = []
         candidates.forEach { candidate in
             let index = list.firstIndex { dictItem in

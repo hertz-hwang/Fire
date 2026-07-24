@@ -16,6 +16,18 @@ enum HandlerStatus {
     case stop
 }
 
+/// 轻量日志：仅在 Debug 构建输出。
+/// 使用 @autoclosure 延迟字符串插值，Release 下既不拼串也不写日志，
+/// 避免在每次按键的热路径上因 NSLog 的同步写入 + 字符串构造造成卡顿。
+#if DEBUG
+func fireLog(_ message: @autoclosure () -> String) {
+    NSLog("%@", message())
+}
+#else
+@inline(__always)
+func fireLog(_ message: @autoclosure () -> String) {}
+#endif
+
 class Utils {
     var toggleInputModeKeyUpChecker = ModifierKeyUpChecker(Defaults[.toggleInputModeKey])
 
@@ -76,26 +88,33 @@ class Utils {
         return NSScreen.main
     }
     
+    // 中英文衔接判断用到的正则，编译一次后复用。
+    // 此前每次调用都会 new 出 4 个 NSRegularExpression，而该方法在按键/上屏热路径上被频繁调用。
+    private static let endsWithEnReg = try? NSRegularExpression(pattern: "[a-zA-Z0-9]$")
+    private static let startsWithCnReg = try? NSRegularExpression(pattern: "^[\\u4e00-\\u9fa5]")
+    private static let endsWithCnReg = try? NSRegularExpression(pattern: "[\\u4e00-\\u9fa5]$")
+    private static let startsWithEnReg = try? NSRegularExpression(pattern: "^[a-zA-Z0-9]")
+
     // 根据上次输入的字符，判断插入的新字符是否要前加空格
     func shouldConcatWithWhitespace(_ lastText: String, _ nextText: String) -> Bool {
-        NSLog("[Utils] shouldConcatWithWhitespace, lastText: \(lastText), nextText: \(nextText)")
+        fireLog("[Utils] shouldConcatWithWhitespace, lastText: \(lastText), nextText: \(nextText)")
         if lastText.count <= 0 || nextText.count <= 0 {
             return false
         }
-        guard let firstEnReg = try? NSRegularExpression(pattern: "[a-zA-Z0-9]$"),
-              let nextCnReg = try? NSRegularExpression(pattern: "^[\\u4e00-\\u9fa5]") else {
+        guard let firstEnReg = Utils.endsWithEnReg,
+              let nextCnReg = Utils.startsWithCnReg,
+              let firstCnReg = Utils.endsWithCnReg,
+              let nextEnReg = Utils.startsWithEnReg else {
             return false
         }
-        if firstEnReg.numberOfMatches(in: lastText, range: NSMakeRange(0, lastText.count)) > 0
-            && nextCnReg.numberOfMatches(in: nextText, range: NSMakeRange(0, nextText.count)) > 0 {
+        let lastRange = NSMakeRange(0, lastText.utf16.count)
+        let nextRange = NSMakeRange(0, nextText.utf16.count)
+        if firstEnReg.numberOfMatches(in: lastText, range: lastRange) > 0
+            && nextCnReg.numberOfMatches(in: nextText, range: nextRange) > 0 {
             return true
         }
-        guard let firstCnReg = try? NSRegularExpression(pattern: "[\\u4e00-\\u9fa5]$"),
-              let nextEnReg = try? NSRegularExpression(pattern: "^[a-zA-Z0-9]") else {
-            return false
-        }
-        return firstCnReg.numberOfMatches(in: lastText, range: NSMakeRange(0, lastText.count)) > 0
-            && nextEnReg.numberOfMatches(in: nextText, range: NSMakeRange(0, nextText.count)) > 0
+        return firstCnReg.numberOfMatches(in: lastText, range: lastRange) > 0
+            && nextEnReg.numberOfMatches(in: nextText, range: nextRange) > 0
     }
 
     static let shared = Utils()

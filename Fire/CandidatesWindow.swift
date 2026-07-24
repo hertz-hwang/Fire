@@ -40,8 +40,8 @@ class CandidatesWindow: NSWindow, NSWindowDelegate {
         hostingView.rootView.origin = originalString
         hostingView.rootView.hasNext = candidatesData.hasNext
         hostingView.rootView.hasPrev = candidatesData.hasPrev
-        NSLog("origin top left: \(topLeft)")
-        NSLog("candidates: \(candidatesData)")
+        fireLog("origin top left: \(topLeft)")
+        fireLog("candidates: \(candidatesData)")
         self.setFrameTopLeftPoint(topLeft)
         self.orderFront(nil)
 //        NSApp.setActivationPolicy(.prohibited)
@@ -68,7 +68,7 @@ class CandidatesWindow: NSWindow, NSWindowDelegate {
         // 由于使用IMKInputController recognizedEvents在一些场景下不能监听到flagChanged事件，比如保存文件和lanchPad场景
         // 所以这里需要使用NSEvent.addGlobalMonitorForEvents监听shift键被按下
         NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { (event) in
-            NSLog("[CandidatesWindow] globalMonitorForEvents flagsChanged: \(event)")
+            fireLog("[CandidatesWindow] globalMonitorForEvents flagsChanged: \(event)")
             if !InputSource.shared.isSelected() {
                 return
             }
@@ -112,7 +112,7 @@ class CandidatesWindow: NSWindow, NSWindowDelegate {
     }
 
     private func transformTopLeft(originalTopLeft: NSPoint) -> NSPoint {
-        NSLog("[FireCandidatesWindow] transformTopLeft: \(frame)")
+        fireLog("[FireCandidatesWindow] transformTopLeft: \(frame)")
 
         let screenPadding: CGFloat = 6
 
