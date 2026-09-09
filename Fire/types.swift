@@ -103,6 +103,8 @@ extension Defaults.Keys {
     static let showCodeInWindow = Key<Bool>("showCodeInWindow", default: true)
     static let codeInWindowMode = Key<CodeInWindowMode>("codeInWindowMode", default: .inputCode)
     static let wubiCodeTip = Key<Bool>("wubiCodeTip", default: true)
+    // 候选词悬浮拆分提示开关
+    static let enableCharDivTip = Key<Bool>("enableCharDivTip", default: true)
     static let maxCodeLength = Key<Int>("maxCodeLength", default: 4)
     static let commitMode = Key<CommitMode>("commitMode", default: CommitMode.spaceCommit)
     static let emptyCodeDirectDelay = Key<Double>("emptyCodeDirectDelay", default: 0.3)

@@ -30,6 +30,7 @@ struct GeneralPane: View {
     @Default(.enableSentenceMode) private var enableSentenceMode
     @Default(.enableSentenceAutoCommit) private var enableSentenceAutoCommit
     @Default(.enableSentenceAllowDuplicateSingle) private var enableSentenceAllowDuplicateSingle
+    @Default(.enableCharDivTip) private var enableCharDivTip
     @Default(.toggleInputModeKey) private var toggleInputModeKey
     @Default(.disableEnMode) private var disableEnMode
     @Default(.disableTempEnMode) private var disableTempEnMode
@@ -134,6 +135,10 @@ struct GeneralPane: View {
                                     Text("8").tag(8)
                                     Text("9").tag(9)
                                 }
+                            }
+                            HStack {
+                                Toggle("拆分信息悬浮提示", isOn: $enableCharDivTip)
+                                Spacer(minLength: 20)
                             }
                             HStack {
                                 Toggle("候选框显示输入码", isOn: $showCodeInWindow)

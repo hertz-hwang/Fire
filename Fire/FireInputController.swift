@@ -32,6 +32,8 @@ class FireInputController: IMKInputController {
     private var _sentenceActive: Bool = false
     // 整句候选高亮位（Tab / Shift+Tab 循环定位）
     private var _sentenceHighlightIndex: Int = 0
+    // 整句解码总候选数（分页用；_candidates 只装当前页）
+    private var _sentenceTotalCount = 0
     internal var inputMode: InputMode {
         get { Fire.shared.inputMode }
         set(value) { Fire.shared.inputMode = value }
@@ -70,8 +72,11 @@ class FireInputController: IMKInputController {
     private var _originalString = "" {
         didSet(oldValue) {
             if oldValue != _originalString {
-                // 编码变化即重置整句高亮位
+                // 编码变化即重置整句高亮位与页码
                 _sentenceHighlightIndex = 0
+                if _sentenceActive {
+                    curPage = 1
+                }
             }
             if self.curPage != 1 {
                 // code被重新设置时，还原页码为1
@@ -97,9 +102,17 @@ class FireInputController: IMKInputController {
         }
     }
     func prevPage() {
+        if _sentenceActive {
+            sentencePage(step: -1)
+            return
+        }
         self.curPage = self.curPage > 1 ? self.curPage - 1 : 1
     }
     func nextPage() {
+        if _sentenceActive {
+            sentencePage(step: 1)
+            return
+        }
         self.curPage = self._hasNext ? self.curPage + 1 : self.curPage
     }
 
@@ -544,9 +557,12 @@ class FireInputController: IMKInputController {
                 (keyCode == kVK_DownArrow && Defaults[.candidatesDirection] == .horizontal) ||
                 (keyCode == kVK_RightArrow && Defaults[.candidatesDirection] == .vertical)
             if needNextPage {
-                // 整句激活：翻页方向键用于循环高亮候选并挂起自动上屏（整句无分页）
                 if _sentenceActive {
-                    cycleSentenceHighlight(step: 1)
+                    if keyCode == kVK_ANSI_Equal {
+                        sentencePage(step: 1)
+                    } else {
+                        cycleSentenceHighlight(step: 1)
+                    }
                     return true
                 }
                 curPage = _hasNext ? curPage + 1 : curPage
@@ -558,7 +574,11 @@ class FireInputController: IMKInputController {
                 (keyCode == kVK_LeftArrow && Defaults[.candidatesDirection] == .vertical)
             if needPrevPage {
                 if _sentenceActive {
-                    cycleSentenceHighlight(step: -1)
+                    if keyCode == kVK_ANSI_Minus {
+                        sentencePage(step: -1)
+                    } else {
+                        cycleSentenceHighlight(step: -1)
+                    }
                     return true
                 }
                 curPage = curPage > 1 ? curPage - 1 : curPage
@@ -568,12 +588,28 @@ class FireInputController: IMKInputController {
         return nil
     }
 
-    /// 整句候选高亮循环（Tab/Shift+Tab、方向键共用）
+    /// 整句候选高亮循环（Tab/Shift+Tab、方向键共用），页内回绕
     private func cycleSentenceHighlight(step: Int) {
         SentenceEngine.shared.suspendAutoCommit(_sentenceSession)
         guard _candidates.count > 0 else { return }
         _sentenceHighlightIndex = (_sentenceHighlightIndex + step + _candidates.count) % _candidates.count
         refreshCandidatesWindow()
+    }
+
+    /// 整句候选翻页（-/= 与候选窗翻页按钮共用）；高亮落到新页首个候选。
+    /// curPage 的 didSet 会触发 refreshCandidatesWindow，句柄分支按页重组候选。
+    private func sentencePage(step: Int) {
+        SentenceEngine.shared.suspendAutoCommit(_sentenceSession)
+        let pageSize = max(1, Defaults[.candidateCount])
+        let pageCount = max(1, (_sentenceTotalCount + pageSize - 1) / pageSize)
+        let target = min(max(1, curPage + step), pageCount)
+        guard target != curPage else {
+            // 已在边缘页：回绕为页内高亮循环，保持按键总有反馈
+            cycleSentenceHighlight(step: step)
+            return
+        }
+        _sentenceHighlightIndex = 0
+        curPage = target
     }
 
     private func deleteKeyHandler(event: NSEvent) -> Bool? {
@@ -1002,13 +1038,22 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                 }
                 if let result = SentenceEngine.shared.candidates(
                     session: _sentenceSession, raw: _originalString) {
-                    _candidates = result.candidates.map { completed in
+                    _sentenceActive = true
+                    // 「候选词数量」照常生效：整句候选按页切，-/= 翻页，
+                    // Tab/方向键在页内循环高亮
+                    let all = result.candidates
+                    _sentenceTotalCount = all.count
+                    let pageSize = max(1, Defaults[.candidateCount])
+                    let pageCount = max(1, (all.count + pageSize - 1) / pageSize)
+                    if curPage > pageCount { curPage = pageCount }
+                    let start = (curPage - 1) * pageSize
+                    let pageItems = Array(all[start..<min(start + pageSize, all.count)])
+                    _candidates = pageItems.map { completed in
                         Candidate(code: completed.segmented.isEmpty ? _originalString : completed.segmented,
                                   text: completed.text,
                                   type: .sentence)
                     }
-                    _hasNext = false
-                    _sentenceActive = true
+                    _hasNext = curPage < pageCount
                     if _sentenceHighlightIndex >= _candidates.count {
                         _sentenceHighlightIndex = max(0, _candidates.count - 1)
                     }
@@ -1021,6 +1066,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                     _hasNext = false
                     _sentenceActive = true
                     _sentenceHighlightIndex = 0
+                    _sentenceTotalCount = 0
+                    curPage = 1
                     return
                 }
             }
@@ -1274,6 +1321,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         _combineCount = nil
         _sentenceActive = false
         _sentenceHighlightIndex = 0
+        _sentenceTotalCount = 0
         // 整句会话整体重置（空格/回车/Esc/上屏都走到这里）
         SentenceEngine.shared.resetSession(_sentenceSession)
         CandidatesWindow.shared.close()

@@ -34,6 +34,7 @@ struct CandidateView: View {
 
     @Default(.themeConfig) private var themeConfig
     @Default(.wubiCodeTip) private var wubiCodeTip
+    @Default(.enableCharDivTip) private var enableCharDivTip
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
@@ -70,12 +71,21 @@ struct CandidateView: View {
             )
         }
         .background(
-            HoverTracking { hovering, screenPoint in
-                if hovering {
-                    let infos = getCharDivInfos(text: candidate.text)
-                    CharDivTipWindow.shared.show(infos, at: screenPoint)
+            Group {
+                if enableCharDivTip {
+                    HoverTracking { hovering, screenPoint in
+                        if hovering {
+                            let infos = getCharDivInfos(text: candidate.text)
+                            CharDivTipWindow.shared.show(infos, at: screenPoint)
+                        } else {
+                            CharDivTipWindow.shared.hide()
+                        }
+                    }
                 } else {
-                    CharDivTipWindow.shared.hide()
+                    // 关闭开关时主动收掉可能还开着的提示窗
+                    Color.clear.onAppear {
+                        CharDivTipWindow.shared.hide()
+                    }
                 }
             }
         )

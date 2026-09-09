@@ -174,9 +174,10 @@ final class SentenceLexicon {
             guard let text = String(data: data, encoding: .utf8) else { continue }
             loadedPath = path
             for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-                guard let spaceIndex = line.firstIndex(of: " ") else { continue }
+                // 分隔符兼容制表符与空格（琉璃表原格式为 tab，允许空格排版）
+                guard let spaceIndex = line.firstIndex(where: { $0 == " " || $0 == "\t" }) else { continue }
                 let entryText = String(line[line.startIndex..<spaceIndex])
-                let code = String(line[line.index(after: spaceIndex)...])
+                let code = String(line[line.index(after: spaceIndex)...].trimmingCharacters(in: .whitespaces))
                 guard !entryText.isEmpty, isSimpleCode(code) else { continue }
                 let len = code.count
                 guard len >= 1, len <= SentenceConfig.wubiMaxCodeLength else { continue }
