@@ -3,7 +3,9 @@
 //  Fire
 //
 //  整句词图边表（移植虎整句 build_lexicon_index 的精简版）。
-//  从现有 wb_py_dict 建内存索引，自动跟随「高级」面板换词库与用户词库。
+//  内置方案：Resources/sentence-codes-liuli.txt（琉璃整句码表，明文
+//  `文字 码`，文件序 = rank）；Application Support 同名文件可覆盖。
+//  与虎整句一致：不使用用户词覆盖层，rank 完全由码表文件序决定。
 //
 
 import Foundation
@@ -32,6 +34,8 @@ final class SentenceLexicon {
     private(set) var builtCodeMode: CodeMode?
     /// 词表代数：每次成功构建 +1；会话的 lattice 跨代数必须重置
     private(set) var generation: Int = 0
+    /// 实际加载的码表路径（诊断用）
+    private(set) var loadedPath: String?
 
     private let queue = DispatchQueue(label: "fire.sentence.lexicon", qos: .userInitiated)
     private let rebuildGate = DispatchQueue(label: "fire.sentence.lexicon.gate")
@@ -84,20 +88,21 @@ final class SentenceLexicon {
                     self.maxCodeLength = snapshot.maxCodeLength
                     self.entryCount = snapshot.entryCount
                     self.codeCount = snapshot.codes.count
+                    self.loadedPath = snapshot.loadedPath
                     self.built = true
                     self.builtCodeMode = mode
                     self.generation += 1
                     NotificationCenter.default.post(name: SentenceLexicon.updated, object: nil)
-                    NSLog("[SentenceLexicon] built mode=%@ entries=%d codes=%d lengths=%@",
+                    NSLog("[SentenceLexicon] built mode=%@ entries=%d codes=%d lengths=%@ path=%@",
                         "\(mode)", snapshot.entryCount, snapshot.codes.count,
-                        "\(snapshot.lengths)")
+                        "\(snapshot.lengths)", snapshot.loadedPath ?? "")
                 }
                 let followUp: CodeMode? = self.rebuildGate.sync {
                     self.building = false
                     self.dirty = false
                     return self.pendingMode
                 }
-                if let followUp = followUp {
+                if followUp != nil {
                     // 构建期间又来新请求：按最新模式（重读 Defaults）补建
                     self.rebuildIfNeeded()
                 }
@@ -115,6 +120,7 @@ final class SentenceLexicon {
         maxCodeLength = snapshot.maxCodeLength
         entryCount = snapshot.entryCount
         codeCount = snapshot.codes.count
+        loadedPath = snapshot.loadedPath
         built = true
         builtCodeMode = mode
         rebuildGate.sync {
@@ -132,84 +138,77 @@ final class SentenceLexicon {
         var properPrefixes: Set<String>
         var maxCodeLength: Int
         var entryCount: Int
+        var loadedPath: String?
     }
 
-    /// 打开一个只读连接（DictManager 的连接在主线程，这里独立开）。
-    /// id 升序 = rank；用户调序/新增的词 id 为负数，天然排最前。
+    /// 内置整句码表文件名（明文 `文字 码`，琉璃整句）
+    static let codesFileName = "sentence-codes-liuli.txt"
+
+    private func candidateTablePaths() -> [String] {
+        var paths: [String] = []
+        if let resourceURL = Bundle.main.resourceURL {
+            paths.append(resourceURL.appendingPathComponent(Self.codesFileName).path)
+        }
+        if let supportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            paths.append(supportDir
+                .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Fire")
+                .appendingPathComponent(Self.codesFileName).path)
+        }
+        return paths
+    }
+
+    /// 解析琉璃整句码表：每行 `文字 码`（文字在前！），文件序 = rank。
+    /// 整句编码只用这张表（与虎整句 schema 的"运行时明文码表、无用户覆盖"一致）。
     private func build(mode: CodeMode) -> Snapshot? {
-        var database: OpaquePointer?
-        guard sqlite3_open_v2(getDatabaseURL().path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            NSLog("[SentenceLexicon] open database failed")
-            sqlite3_close_v2(database)
-            return nil
-        }
-        var statement: OpaquePointer?
-        defer {
-            if let statement = statement { sqlite3_finalize(statement) }
-            sqlite3_close_v2(database)
-        }
-
-        let types: String
-        switch mode {
-        case .wubi, .wubiPinyin:
-            types = "('wb', 'user')"
-        case .pinyin:
-            types = "('py', 'user')"
-        }
-        let lengthCap = mode == .pinyin
-            ? SentenceConfig.pinyinMaxCodeLength
-            : SentenceConfig.wubiMaxCodeLength
-
-        let sql = """
-            select query, text, type from wb_py_dict
-            where type in \(types) and query glob '[a-z]*'
-            order by id asc
-        """
-        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else {
-            NSLog("[SentenceLexicon] prepare failed: %@",
-                  String(cString: sqlite3_errmsg(database)))
-            return nil
-        }
-
         var codes: [String: [SentenceEdge]] = [:]
         var lengthValues = Set<Int>()
         var entryCount = 0
         // 单字最短码：optimal_single 标记（同字多码取最短，先到先得即最小 rank）
         var optimalSingleCode: [String: String] = [:]
+        var loadedPath: String?
 
-        while sqlite3_step(statement) == SQLITE_ROW {
-            guard let queryText = sqlite3_column_text(statement, 0),
-                  let hintText = sqlite3_column_text(statement, 1) else { continue }
-            let code = String(cString: queryText)
-            let text = String(cString: hintText)
-            // 只收 ASCII 小写字母码；含空格/数字/符号的自定义条目跳过
-            guard isSimpleCode(code) else { continue }
-            let len = code.count
-            guard len >= 1, len <= lengthCap else { continue }
+        for path in candidateTablePaths() where FileManager.default.fileExists(atPath: path) {
+            guard let handle = FileHandle(forReadingAtPath: path) else { continue }
+            defer { try? handle.close() }
+            let data = handle.readDataToEndOfFile()
+            guard let text = String(data: data, encoding: .utf8) else { continue }
+            loadedPath = path
+            for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+                guard let spaceIndex = line.firstIndex(of: " ") else { continue }
+                let entryText = String(line[line.startIndex..<spaceIndex])
+                let code = String(line[line.index(after: spaceIndex)...])
+                guard !entryText.isEmpty, isSimpleCode(code) else { continue }
+                let len = code.count
+                guard len >= 1, len <= SentenceConfig.wubiMaxCodeLength else { continue }
 
-            var edges = codes[code] ?? []
-            // 同 (code,text) 去重：rank 用"该 code 下第 n 条"（与虎整句一致）
-            if edges.contains(where: { $0.text == text }) {
-                continue
-            }
-            let rank = edges.count + 1
-            edges.append(SentenceEdge(text: text, rank: rank))
-            codes[code] = edges
-            lengthValues.insert(len)
-            entryCount += 1
+                var edges = codes[code] ?? []
+                // 同 (code,text) 去重：rank 用"该 code 下第 n 条"（与虎整句一致）
+                if edges.contains(where: { $0.text == entryText }) {
+                    continue
+                }
+                let rank = edges.count + 1
+                edges.append(SentenceEdge(text: entryText, rank: rank))
+                codes[code] = edges
+                lengthValues.insert(len)
+                entryCount += 1
 
-            if text.count == 1 {
-                if let existing = optimalSingleCode[text] {
-                    if len < existing.count {
-                        optimalSingleCode[text] = code
+                if entryText.count == 1 {
+                    if let existing = optimalSingleCode[entryText] {
+                        if len < existing.count {
+                            optimalSingleCode[entryText] = code
+                        }
+                    } else {
+                        optimalSingleCode[entryText] = code
                     }
-                } else {
-                    optimalSingleCode[text] = code
                 }
             }
+            break // 第一个存在的表就是生效表
         }
 
-        guard !codes.isEmpty else { return nil }
+        guard !codes.isEmpty else {
+            NSLog("[SentenceLexicon] codes table not found in %@", candidateTablePaths().joined(separator: ", "))
+            return nil
+        }
 
         // 回填 optimalSingle
         for (code, edges) in codes {
@@ -237,7 +236,8 @@ final class SentenceLexicon {
         let lengths = lengthValues.sorted()
         let maxLength = lengths.last ?? 1
         return Snapshot(codes: codes, lengths: lengths, properPrefixes: prefixes,
-                        maxCodeLength: maxLength, entryCount: entryCount)
+                        maxCodeLength: maxLength, entryCount: entryCount,
+                        loadedPath: loadedPath)
     }
 
     @inline(__always)
@@ -249,9 +249,6 @@ final class SentenceLexicon {
         }
         return !code.isEmpty
     }
-
-    /// 把语句的 statement 暴露给 defer 用（Swift 限制：defer 捕获 var）
-    private var statement: OpaquePointer? { nil }
 
     // MARK: - 查询
 

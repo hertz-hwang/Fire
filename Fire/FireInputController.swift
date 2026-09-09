@@ -633,6 +633,16 @@ class FireInputController: IMKInputController {
             }
             return true
         }
+        // 整句激活时 ;/' 是选重符（虎整句 alphabet），吸收进编码固定用字但不上屏；
+        // 空闲时交回 punctuationKeyHandler 出标点
+        if _sentenceActive, string == ";" || string == "'" {
+            if _originalString.count >= SentenceConfig.maxRawLength {
+                return nil
+            }
+            _originalString += string
+            SentenceEngine.shared.evidenceInvalidated(_sentenceSession)
+            return true
+        }
         return nil
     }
 
@@ -671,9 +681,13 @@ class FireInputController: IMKInputController {
         // 当前输入的是数字,选择当前候选列表中的第N个字符 v
         if let pos = Int(string) {
             if _originalString.count > 0 {
-                // 整句激活时数字不选候选：数字在虎整句里是写进编码的选重符，
-                // Fire 没有这个语义，吞掉以免污染词图
+                // 整句激活时数字不选候选：数字写进编码当选重符（虎整句 2=第2码…），
+                // 固定该段用字但不上屏
                 if _sentenceActive {
+                    if _originalString.count < SentenceConfig.maxRawLength {
+                        _originalString += string
+                        SentenceEngine.shared.evidenceInvalidated(_sentenceSession)
+                    }
                     return true
                 }
                 let index = pos - 1
@@ -998,6 +1012,15 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                     if _sentenceHighlightIndex >= _candidates.count {
                         _sentenceHighlightIndex = max(0, _candidates.count - 1)
                     }
+                    return
+                }
+                // 编码含选重符（锁定用字）时不回落到普通词候选——
+                // 虎整句里带选重符的输入只由整句方案消化，无可解时保持空菜单
+                if SentenceEngine.containsSelector(_originalString) {
+                    _candidates = []
+                    _hasNext = false
+                    _sentenceActive = true
+                    _sentenceHighlightIndex = 0
                     return
                 }
             }

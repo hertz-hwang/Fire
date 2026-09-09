@@ -29,6 +29,7 @@ struct GeneralPane: View {
     @Default(.zKeyRepeat) private var zKeyRepeat
     @Default(.enableSentenceMode) private var enableSentenceMode
     @Default(.enableSentenceAutoCommit) private var enableSentenceAutoCommit
+    @Default(.enableSentenceAllowDuplicateSingle) private var enableSentenceAllowDuplicateSingle
     @Default(.toggleInputModeKey) private var toggleInputModeKey
     @Default(.disableEnMode) private var disableEnMode
     @Default(.disableTempEnMode) private var disableTempEnMode
@@ -82,6 +83,10 @@ struct GeneralPane: View {
                             if enableSentenceMode {
                                 HStack {
                                     Toggle("自动上屏", isOn: $enableSentenceAutoCommit)
+                                    Spacer(minLength: 50)
+                                }
+                                HStack {
+                                    Toggle("单字单码组句", isOn: $enableSentenceAllowDuplicateSingle)
                                     Spacer(minLength: 50)
                                 }
                             }

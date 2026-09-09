@@ -71,6 +71,7 @@
 		AA5E0004000000000SENT004 /* SentenceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0004000000000SENT104 /* SentenceEngine.swift */; };
 		AA5E0005000000000SENT005 /* SentenceTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0005000000000SENT105 /* SentenceTypes.swift */; };
 		AA5E0006000000000SENT006 /* sentence-ngram-mobile.bin in Resources */ = {isa = PBXBuildFile; fileRef = AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */; };
+		AA5E0007000000000SENT007 /* sentence-codes-liuli.txt in Resources */ = {isa = PBXBuildFile; fileRef = AA5E0007000000000SENT107 /* sentence-codes-liuli.txt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -152,6 +153,7 @@
 		AA5E0004000000000SENT104 /* SentenceEngine.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceEngine.swift; sourceTree = "<group>"; };
 		AA5E0005000000000SENT105 /* SentenceTypes.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceTypes.swift; sourceTree = "<group>"; };
 		AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */ = {isa = PBXFileReference; lastKnownFileType = file; path = "sentence-ngram-mobile.bin"; sourceTree = "<group>"; };
+		AA5E0007000000000SENT107 /* sentence-codes-liuli.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "sentence-codes-liuli.txt"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -311,6 +313,7 @@
 				F19CED7AB5B1DBD756937732 /* ll_div.txt */,
 				67C9A0212AB53ED3000B5281 /* wb_98_table.txt */,
 				AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */,
+				AA5E0007000000000SENT107 /* sentence-codes-liuli.txt */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -472,6 +475,7 @@
 				91A475092F62847B0047EEBC /* liuli_table.txt in Resources */,
 				91A4750C2F62847B0047EEBC /* xiaoxiang_table.txt in Resources */,
 				AA5E0006000000000SENT006 /* sentence-ngram-mobile.bin in Resources */,
+				AA5E0007000000000SENT007 /* sentence-codes-liuli.txt in Resources */,
 				67C9A00D2AB53E83000B5281 /* fire.pdf in Resources */,
 				67C9A0392AB53ED3000B5281 /* wb_98_table.txt in Resources */,
 				67C9A0092AB53E83000B5281 /* MainMenu.xib in Resources */,

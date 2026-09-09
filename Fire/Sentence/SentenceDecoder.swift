@@ -5,15 +5,18 @@
 //  整句 beam search 解码器（移植虎整句 expand_range / emit / dedup_limit /
 //  select_exact_top / decode 增量复用 / build_prefix_evidence）。
 //
-//  与虎整句的已确认差异：Fire 不把 `;`/`'`/数字选重写进编码——候选切换在
-//  候选栏层用 Tab/翻页完成。因此边一律消耗 codeLength 个键（无 parse_selector），
-//  非整段边只取 rank 1，整段命中单一码时全部 rank 参与竞争。
+//  选重符（与虎整句 speller alphabet 对齐，写进编码流）：
+//  `;`=第2码 `'`=第3码 数字=第N码（0=第10），消耗 1..n 个键。
+//  未跟选重符时（selectedRank=0）：整段边全 rank 参与；分段边在
+//  allowDuplicateSingle 开时允许 rank1 + 单字重码，关时只允许 rank1。
+//  显式选重的边不加 rank 轻罚、不加整码单字奖励（与 Lua 一致）。
 //
-//  编码以 [UInt8]（normalize 后保证全是 ASCII）贯穿解码，避免热路径上的 String 切片。
+//  编码以 [UInt8]（normalize 后保证全是 a-z;'0-9）贯穿解码。
 //
 
 import Foundation
 import os
+import Defaults
 
 // MARK: - 词图状态
 
@@ -54,6 +57,69 @@ func beamLimitAt(_ rawLength: Int) -> Int {
     rawLength > SentenceConfig.longInputFullBeamLength
         ? SentenceConfig.longInputBeamWidth
         : SentenceConfig.beamWidth
+}
+
+// MARK: - 选重符（Lua parse_selector / trailing_selector_span / has_selection_suffix）
+
+enum Selector {
+    /// 码边结束位置 codeEnd 之后的选重符：返回 (rank, 消耗到的位置)。
+    /// 数字可连打（"12" = 第12码），"0" = 第10。
+    static func parse(_ raw: [UInt8], _ codeEnd: Int) -> (rank: Int, consumedEnd: Int) {
+        guard codeEnd < raw.count else { return (0, codeEnd) }
+        let mark = raw[codeEnd]
+        if mark == 0x3B { return (2, codeEnd + 1) } // ';'
+        if mark == 0x27 { return (3, codeEnd + 1) } // '''
+        if mark >= 0x30 && mark <= 0x39 {            // 数字
+            var end = codeEnd
+            while end < raw.count, raw[end] >= 0x30, raw[end] <= 0x39 {
+                end += 1
+            }
+            let token = String(decoding: raw[codeEnd..<end], as: UTF8.self)
+            if token == "0" { return (10, end) }
+            return (Int(token) ?? 0, end)
+        }
+        return (0, codeEnd)
+    }
+
+    /// 尾部连续选重符字节数（增量复用时 maxConsume 加宽用）
+    static func trailingSpan(_ raw: [UInt8]) -> Int {
+        var index = raw.count
+        while index > 0 {
+            let mark = raw[index - 1]
+            if (mark >= 0x30 && mark <= 0x39) || mark == 0x3B || mark == 0x27 {
+                index -= 1
+            } else {
+                break
+            }
+        }
+        return raw.count - index
+    }
+
+    static func hasSelectionSuffix(_ raw: [UInt8]) -> Bool {
+        for mark in raw {
+            if (mark >= 0x30 && mark <= 0x39) || mark == 0x3B || mark == 0x27 {
+                return true
+            }
+        }
+        return false
+    }
+}
+
+/// 边资格（Lua eligible_candidates）：
+/// rank>0：只取该 rank。rank=0（无选重符）：整段边全收；
+/// allowDuplicateSingle 开时允许 rank1 + 单字重码；关时只允许 rank1。
+func eligibleEdges(_ edges: [SentenceEdge], selectedRank: Int,
+                   wholeInputEdge: Bool, allowDuplicateSingle: Bool) -> [SentenceEdge] {
+    if selectedRank > 0 {
+        return edges.filter { $0.rank == selectedRank }
+    }
+    if wholeInputEdge {
+        return edges
+    }
+    if allowDuplicateSingle {
+        return edges.filter { $0.rank == 1 || $0.text.count == 1 }
+    }
+    return edges.filter { $0.rank == 1 }
 }
 
 // MARK: - 状态比较器（Lua current_state_comparator / state_better_*）
@@ -207,8 +273,6 @@ final class SentenceBucket {
         if truncatedNow {
             output.truncated = true
             result = selectExactTop(result, limit: limit, better: better)
-        } else if !aggregated {
-            // 未截断时仍聚合，保证同文本只留一条
         }
         if aggregated {
             output.adoptAggregated(result)
@@ -243,6 +307,8 @@ final class SentenceDecoder {
     private var cachedBuckets: [SentenceBucket?] = []
     /// lattice 构建时的词表代数；换词库后必须整体重解码
     private var cachedLexiconGeneration: Int = -1
+    /// 单字单码开关变更也让增量缓存作废（rank 资格变了）
+    private var cachedAllowDuplicate: Bool?
 
     /// 单字缓存：文本 -> [Unicode scalar]
     private var charCache: [String: [UInt32]] = [:]
@@ -267,7 +333,7 @@ final class SentenceDecoder {
         cachedBuckets = []
     }
 
-    /// normalize：小写 + 去空白；Fire 的原码只可能是 a-z 与极少数符号
+    /// normalize：小写 + 去空白，保留选重符 a-z;'0-9（虎整句 alphabet 同源）
     static func normalize(_ raw: String) -> [UInt8]? {
         var bytes: [UInt8] = []
         bytes.reserveCapacity(raw.count)
@@ -276,10 +342,12 @@ final class SentenceDecoder {
             if value == 0x20 || value == 0x09 { continue }
             if value >= 0x41 && value <= 0x5A {
                 bytes.append(UInt8(value + 32))
-            } else if value >= 0x61 && value <= 0x7A {
+            } else if (value >= 0x61 && value <= 0x7A)      // a-z
+                        || value == 0x3B || value == 0x27     // ; '
+                        || (value >= 0x30 && value <= 0x39) { // 0-9
                 bytes.append(UInt8(value))
             } else {
-                return nil // 非字母（含数字/;'`）不参与整句
+                return nil // 其它字符不参与整句
             }
         }
         return bytes
@@ -296,7 +364,8 @@ final class SentenceDecoder {
 
     private func expandRange(_ raw: [UInt8], _ buckets: inout [SentenceBucket?],
                              from fromPos: Int, length: Int,
-                             minimumConsumedEnd: Int = -1) {
+                             minimumConsumedEnd: Int = -1,
+                             allowDuplicateSingle: Bool) {
         var scratch: [UInt8] = []
         for position in fromPos..<length {
             guard var current = buckets[position] else { continue }
@@ -307,20 +376,22 @@ final class SentenceDecoder {
             for codeLength in lexicon.lengths {
                 let end = position + codeLength
                 if end > length { continue }
-                if end <= minimumConsumedEnd { continue }
+                let selector = Selector.parse(raw, end)
+                let consumedEnd = selector.consumedEnd
+                if consumedEnd > length { continue }
+                if consumedEnd <= minimumConsumedEnd { continue }
                 // 短边门槛（虎整句同源规则）：length>1 时只允许"整段消耗"或
-                // "消耗 ≥2 键"的边。单字母码（一简字 a工 b了 c以 d在…）若允许
-                // 做中段边，任何尾部键都"可覆盖"，空码自动上屏永远不会触发。
-                if length > 1 && end - position < 2 { continue }
+                // "消耗 ≥2 键"的边（按 consumedEnd-position，选重符计入段消耗）。
+                if length > 1 && consumedEnd - position < 2 { continue }
                 scratch = Array(raw[position..<end])
                 let code = String(decoding: scratch, as: UTF8.self)
                 guard let edges = lexicon.edges(for: code) else { continue }
 
-                let wholeInputEdge = position == 0 && end == length
-                // 整段边全 rank 竞争；分段边只允许 rank 1
-                let selected: [SentenceEdge] = wholeInputEdge
-                    ? edges
-                    : edges.filter { $0.rank == 1 }
+                let wholeInputEdge = position == 0 && consumedEnd == length
+                let selected = eligibleEdges(edges,
+                                            selectedRank: selector.rank,
+                                            wholeInputEdge: wholeInputEdge,
+                                            allowDuplicateSingle: allowDuplicateSingle)
                 if selected.isEmpty { continue }
 
                 for item in current.items {
@@ -335,12 +406,14 @@ final class SentenceDecoder {
                             prev2 = prev1
                             prev1 = scalar
                         }
-                        if edge.rank > 1 {
+                        // 显式选重的边不加 rank 轻罚（Lua：selected_rank==0 才罚）
+                        if selector.rank == 0 {
                             score -= SentenceConfig.rankPenalty * Foundation.log(Double(edge.rank))
                         }
                         // 整码最优单字奖励只加在 score，不进 massScore（置信度）
                         var massDelta = score - item.score
-                        if wholeInputEdge && edge.optimalSingle && edgeScalars.count == 1 {
+                        if wholeInputEdge && selector.rank == 0
+                            && edge.optimalSingle && edgeScalars.count == 1 {
                             score += SentenceConfig.wholeInputSingleCharacterReward
                             massDelta = score - item.score - SentenceConfig.wholeInputSingleCharacterReward
                         }
@@ -351,11 +424,11 @@ final class SentenceDecoder {
                             prev2: prev2, prev1: prev1,
                             maxRank: Swift.max(item.maxRank, edge.rank),
                             previous: item,
-                            rawLength: end,
+                            rawLength: consumedEnd,
                             edgeCount: item.edgeCount + 1)
-                        let bucket = buckets[end] ?? SentenceBucket()
+                        let bucket = buckets[consumedEnd] ?? SentenceBucket()
                         bucket.append(state)
-                        buckets[end] = bucket
+                        buckets[consumedEnd] = bucket
                     }
                 }
             }
@@ -397,7 +470,8 @@ final class SentenceDecoder {
     // MARK: - emit（Lua emit）
 
     fileprivate func emit(_ raw: [UInt8], _ buckets: inout [SentenceBucket?], length: Int,
-                         includeEarlyCommit: Bool) -> SentenceDecodeResult {
+                         includeEarlyCommit: Bool,
+                         allowDuplicateSingle: Bool) -> SentenceDecodeResult {
         let completedBucket = (buckets[length] ?? SentenceBucket())
             .dedup(limit: beamLimitAt(length), better: stateBetterScoreFirst)
         buckets[length] = completedBucket
@@ -410,11 +484,13 @@ final class SentenceDecoder {
             all.append(candidate)
         }
 
-        // 分段路径按分数竞争，纯整段单边保持词库序（Lua prefer_score_over_lexicon_rank）
+        // 单字单码组句开 + 分段路径 → 分数竞争；否则保持词库序
+        // （Lua prefer_score_over_lexicon_rank：allow 关时恒 rank-first）
         let hasSegmentedPath = all.contains {
             $0.path.previous != nil && $0.path.previous!.rawLength > 0
         }
-        let better = hasSegmentedPath ? stateBetterScoreFirst : stateBetterRankFirst
+        let better = (allowDuplicateSingle && hasSegmentedPath)
+            ? stateBetterScoreFirst : stateBetterRankFirst
         var result = all
         if result.count > SentenceConfig.candidateLimit {
             // 最劣堆按 path 选，再按同一 better 映射回候选
@@ -603,6 +679,7 @@ final class SentenceDecoder {
     /// 整句解码。append：从 `oldN + 1 - maxConsume` 起扩展并禁止产生
     /// consumedEnd ≤ oldN 的新边；delete：直接砍尾部桶。
     func decode(_ rawCode: String, includeEarlyCommit: Bool = false) -> SentenceDecodeResult {
+        let allowDuplicate = Defaults[.enableSentenceAllowDuplicateSingle]
         guard let raw = SentenceDecoder.normalize(rawCode), !raw.isEmpty,
               SentenceDecoder.hasLetter(raw),
               raw.count <= SentenceConfig.maxRawLength else {
@@ -611,11 +688,12 @@ final class SentenceDecoder {
         }
         let length = raw.count
 
-        // 词表换代（重建索引/用户加词）后旧 lattice 失效，整体重解码
-        if lexicon.generation != cachedLexiconGeneration {
+        // 词表换代 / 单字单码开关变更后旧 lattice 失效，整体重解码
+        if lexicon.generation != cachedLexiconGeneration || cachedAllowDuplicate != allowDuplicate {
             cachedRaw = []
             cachedBuckets = []
             cachedLexiconGeneration = lexicon.generation
+            cachedAllowDuplicate = allowDuplicate
         }
 
         let signpostID = OSSignpostID(log: .sentence)
@@ -632,7 +710,9 @@ final class SentenceDecoder {
             } else if oldN <= 4 || length <= 4 {
                 buckets = nil
             } else if length > oldN, Array(raw.prefix(oldN)) == oldRaw {
-                let maxConsume = lexicon.maxCodeLength
+                // 选重符可挂在任何码边后：追加一键可能激活旧位置的 rank2/3 边，
+                // maxConsume 加上尾部选重符跨度（Lua trailing_selector_span）
+                let maxConsume = lexicon.maxCodeLength + Selector.trailingSpan(raw)
                 let fromPos = Swift.max(0, oldN + 1 - maxConsume)
                 var reused = cachedBuckets
                 if reused.count < length + 1 {
@@ -641,7 +721,9 @@ final class SentenceDecoder {
                 for index in (oldN + 1)...length {
                     reused[index] = SentenceBucket()
                 }
-                expandRange(raw, &reused, from: fromPos, length: length, minimumConsumedEnd: oldN)
+                expandRange(raw, &reused, from: fromPos, length: length,
+                           minimumConsumedEnd: oldN,
+                           allowDuplicateSingle: allowDuplicate)
                 buckets = reused
             } else if length < oldN, Array(oldRaw.prefix(length)) == raw {
                 buckets = Array(cachedBuckets.prefix(length + 1))
@@ -649,22 +731,13 @@ final class SentenceDecoder {
         }
 
         if buckets == nil {
-            var fresh: [SentenceBucket?] = Array(repeating: nil, count: length + 1)
-            let root = SentenceBucket()
-            root.append(SentenceState(score: 0, massScore: 0, text: "",
-                                      prev2: NgramModel.bos, prev1: NgramModel.bos,
-                                      maxRank: 1, previous: nil, rawLength: 0, edgeCount: 0))
-            fresh[0] = root
-            for index in 1...length {
-                fresh[index] = SentenceBucket()
-            }
-            expandRange(raw, &fresh, from: 0, length: length)
-            buckets = fresh
+            buckets = buildFreshBuckets(raw, allowDuplicateSingle: allowDuplicate)
         }
 
         var finalBuckets = buckets!
         let result = emit(raw, &finalBuckets, length: length,
-                          includeEarlyCommit: includeEarlyCommit)
+                          includeEarlyCommit: includeEarlyCommit,
+                          allowDuplicateSingle: allowDuplicate)
 
         cachedRaw = raw
         cachedBuckets = finalBuckets
@@ -673,7 +746,8 @@ final class SentenceDecoder {
         // 增量一致性断言（虎整句 results_equal 思路）。增量复用出 bug 表现为
         // 长句偶尔跳字且极难复现，这是唯一能兜住的手段。
         if length > 4 {
-            let full = decodeFull(raw, includeEarlyCommit: includeEarlyCommit)
+            let full = decodeFull(raw, includeEarlyCommit: includeEarlyCommit,
+                                  allowDuplicateSingle: allowDuplicate)
             let incremental = result.candidates.map {
                 "\($0.text)|\($0.segmented)|\($0.score)|\($0.confidenceScore)"
             }
@@ -687,8 +761,7 @@ final class SentenceDecoder {
         return result
     }
 
-    /// 全量解码（DEBUG 一致性校验用）
-    fileprivate func decodeFull(_ raw: [UInt8], includeEarlyCommit: Bool) -> SentenceDecodeResult {
+    private func buildFreshBuckets(_ raw: [UInt8], allowDuplicateSingle: Bool) -> [SentenceBucket?] {
         let length = raw.count
         var fresh: [SentenceBucket?] = Array(repeating: nil, count: length + 1)
         let root = SentenceBucket()
@@ -699,8 +772,17 @@ final class SentenceDecoder {
         for index in 1...length {
             fresh[index] = SentenceBucket()
         }
-        expandRange(raw, &fresh, from: 0, length: length)
-        return emit(raw, &fresh, length: length, includeEarlyCommit: includeEarlyCommit)
+        expandRange(raw, &fresh, from: 0, length: length,
+                    allowDuplicateSingle: allowDuplicateSingle)
+        return fresh
+    }
+
+    /// 全量解码（DEBUG 一致性校验用）
+    fileprivate func decodeFull(_ raw: [UInt8], includeEarlyCommit: Bool,
+                               allowDuplicateSingle: Bool) -> SentenceDecodeResult {
+        var fresh = buildFreshBuckets(raw, allowDuplicateSingle: allowDuplicateSingle)
+        return emit(raw, &fresh, length: raw.count, includeEarlyCommit: includeEarlyCommit,
+                    allowDuplicateSingle: allowDuplicateSingle)
     }
 }
 

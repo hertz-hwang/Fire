@@ -22,6 +22,9 @@ final class SentenceSession {
 
     /// 已自动上屏的文字（用于撤销与统计，解码不再回溯它）
     var committedText: String = ""
+    /// 已自动上屏的编码长度（虎整句 committed_raw 的等价物，统计/回溯用；
+    /// 选重符 `;`/数字直接写在 _originalString 里，由 decode 的 parse_selector 消化）
+    var committedRawLength: Int = 0
     /// 上下键/翻页/Tab/退格后挂起自动上屏
     var suspended: Bool = false
     /// 空码上屏后的延续标记（保留给后续规则，行为对齐虎整句）
@@ -50,6 +53,7 @@ final class SentenceSession {
     func resetAll() {
         decoder.reset()
         committedText = ""
+        committedRawLength = 0
         suspended = false
         continuationAfterAutoCommit = false
         resetEvidence()
@@ -65,13 +69,21 @@ final class SentenceEngine {
     /// 设置变更纪元：整句/自动上屏/编码模式变化 +1，会话检测后重置并清 decode 缓存
     private(set) var epoch: Int = 0
     private var epochObserver: Defaults.Observation?
+    private var duplicateObserver: Defaults.Observation?
     private var lexiconObserver: Any?
 
     private init() {
-        epochObserver = Defaults.observe(keys: .enableSentenceMode, .enableSentenceAutoCommit, .codeMode, .sentenceModelPath) { [weak self] in
+        epochObserver = Defaults.observe(keys: .enableSentenceMode, .enableSentenceAutoCommit,
+                                         .codeMode, .sentenceModelPath) { [weak self] in
             guard let self = self else { return }
             self.epoch += 1
             SentenceLexicon.shared.markDirty()
+        }
+        .tieToLifetime(of: self)
+        // 单字单码组句只改边资格不改词表：重置会话但别把词表打脏重建
+        duplicateObserver = Defaults.observe(keys: .enableSentenceAllowDuplicateSingle) { [weak self] in
+            guard let self = self else { return }
+            self.epoch += 1
         }
         .tieToLifetime(of: self)
         lexiconObserver = NotificationCenter.default.addObserver(
@@ -104,9 +116,12 @@ final class SentenceEngine {
 
     /// 整句候选（type = .sentence，code 为分段码，供候选栏展示）。
     /// 不可用时返回 nil，调用方回落普通词候选。
+    /// raw 里的选重符（`;`/`'`/数字）原样进解码——parse_selector 会把它
+    /// 解析成该段的显式 rank，锁定用字但不上屏；展示用的 segmented 在
+    /// 解码器里已剥掉选重符。
     func candidates(session: SentenceSession, raw: String) -> SentenceDecodeResult? {
         guard available else { return nil }
-        guard raw.first != "`", raw.first != ";" else { return nil }
+        guard raw.first != "`" else { return nil }
         let result = session.decoder.decode(raw, includeEarlyCommit: false)
         if result.candidates.isEmpty { return nil }
         return result
@@ -266,6 +281,7 @@ final class SentenceEngine {
 
         let commit = tracker.text
         session.committedText = committedTextByAppending(session.committedText, commit)
+        session.committedRawLength += tracker.rawLength
         session.lastAutoCommitRawLength = tracker.rawLength
         session.continuationAfterAutoCommit = false
         session.resetEvidence()
@@ -398,6 +414,7 @@ final class SentenceEngine {
 
         let retainedRaw = String(raw.dropFirst(pending.baseRawLength))
         session.committedText = committedTextByAppending(session.committedText, commit)
+        session.committedRawLength += pending.baseRawLength
         session.lastAutoCommitRawLength = pending.baseRawLength
         session.trackers = [:]
         session.lastSeenRaw = ""
@@ -416,7 +433,11 @@ final class SentenceEngine {
         let decoded = session.decoder.decode(fullBefore, includeEarlyCommit: false)
         guard !decoded.candidates.isEmpty else { return nil }
         let visibleTop = decoded.candidates[0]
-        let eligible = decoded.candidates.filter { $0.maxRank <= 1 }
+        // 虎整句：编码里带显式选重符时全 rank 都有资格；否则只认隐式首选
+        let restrict = !Selector.hasSelectionSuffix(Array(fullBefore.utf8))
+        let eligible = restrict
+            ? decoded.candidates.filter { $0.maxRank <= 1 }
+            : decoded.candidates
         guard let first = eligible.first else { return nil }
         guard !first.text.isEmpty else { return nil }
 
@@ -449,12 +470,22 @@ final class SentenceEngine {
             lastSegmentStart: previous?.rawLength ?? 0)
     }
 
-    /// raw 能否被精确码边完整覆盖（Lua has_complete_candidate，无选重精简版）
+    /// 编码里是否含选重符（`;`/`'`/数字）
+    static func containsSelector(_ raw: String) -> Bool {
+        for scalar in raw.unicodeScalars {
+            let v = scalar.value
+            if v == 0x3B || v == 0x27 || (v >= 0x30 && v <= 0x39) { return true }
+        }
+        return false
+    }
+
+    /// raw 能否被精确码边完整覆盖（Lua has_complete_candidate）
     func hasCompleteCandidate(_ raw: String) -> Bool {
         guard let bytes = SentenceDecoder.normalize(raw), !bytes.isEmpty else {
             return false
         }
         let n = bytes.count
+        let allowDuplicate = Defaults[.enableSentenceAllowDuplicateSingle]
         var reachable = [Bool](repeating: false, count: n + 1)
         reachable[0] = true
         for position in 0..<n {
@@ -462,13 +493,19 @@ final class SentenceEngine {
             for codeLength in lexicon.lengths {
                 let end = position + codeLength
                 if end > n { continue }
-                if n > 1 && end - position < 2 { continue }
+                let selector = Selector.parse(bytes, end)
+                let consumedEnd = selector.consumedEnd
+                if consumedEnd > n { continue }
+                if n > 1 && consumedEnd - position < 2 { continue }
                 let code = String(decoding: bytes[position..<end], as: UTF8.self)
                 guard let edges = lexicon.edges(for: code) else { continue }
-                let wholeInputEdge = position == 0 && end == n
-                let selected = wholeInputEdge ? edges : edges.filter { $0.rank == 1 }
+                let wholeInputEdge = position == 0 && consumedEnd == n
+                let selected = eligibleEdges(edges,
+                                            selectedRank: selector.rank,
+                                            wholeInputEdge: wholeInputEdge,
+                                            allowDuplicateSingle: allowDuplicate)
                 if !selected.isEmpty {
-                    reachable[end] = true
+                    reachable[consumedEnd] = true
                 }
             }
         }
