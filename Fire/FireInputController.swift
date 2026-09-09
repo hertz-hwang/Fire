@@ -26,6 +26,12 @@ class FireInputController: IMKInputController {
     private var _pendingDeleteCandidate: Candidate?
     // 组词模式下当前组合的字数，非 nil 时处于"快速加词"组词态
     private var _combineCount: Int?
+    // 整句会话：per-controller（IMK 多 client 多 controller，_originalString 本身就是 per-controller）
+    private let _sentenceSession = SentenceSession()
+    // 整句候选是否激活（激活时数字键不再把数字追加进编码）
+    private var _sentenceActive: Bool = false
+    // 整句候选高亮位（Tab / Shift+Tab 循环定位）
+    private var _sentenceHighlightIndex: Int = 0
     internal var inputMode: InputMode {
         get { Fire.shared.inputMode }
         set(value) { Fire.shared.inputMode = value }
@@ -62,7 +68,11 @@ class FireInputController: IMKInputController {
     }
 
     private var _originalString = "" {
-        didSet {
+        didSet(oldValue) {
+            if oldValue != _originalString {
+                // 编码变化即重置整句高亮位
+                _sentenceHighlightIndex = 0
+            }
             if self.curPage != 1 {
                 // code被重新设置时，还原页码为1
                 self.curPage = 1
@@ -534,6 +544,11 @@ class FireInputController: IMKInputController {
                 (keyCode == kVK_DownArrow && Defaults[.candidatesDirection] == .horizontal) ||
                 (keyCode == kVK_RightArrow && Defaults[.candidatesDirection] == .vertical)
             if needNextPage {
+                // 整句激活：翻页方向键用于循环高亮候选并挂起自动上屏（整句无分页）
+                if _sentenceActive {
+                    cycleSentenceHighlight(step: 1)
+                    return true
+                }
                 curPage = _hasNext ? curPage + 1 : curPage
                 return true
             }
@@ -542,11 +557,23 @@ class FireInputController: IMKInputController {
                 (keyCode == kVK_UpArrow && Defaults[.candidatesDirection] == .horizontal) ||
                 (keyCode == kVK_LeftArrow && Defaults[.candidatesDirection] == .vertical)
             if needPrevPage {
-                curPage = curPage > 1 ? curPage - 1 : 1
+                if _sentenceActive {
+                    cycleSentenceHighlight(step: -1)
+                    return true
+                }
+                curPage = curPage > 1 ? curPage - 1 : curPage
                 return true
             }
         }
         return nil
+    }
+
+    /// 整句候选高亮循环（Tab/Shift+Tab、方向键共用）
+    private func cycleSentenceHighlight(step: Int) {
+        SentenceEngine.shared.suspendAutoCommit(_sentenceSession)
+        guard _candidates.count > 0 else { return }
+        _sentenceHighlightIndex = (_sentenceHighlightIndex + step + _candidates.count) % _candidates.count
+        refreshCandidatesWindow()
     }
 
     private func deleteKeyHandler(event: NSEvent) -> Bool? {
@@ -554,6 +581,10 @@ class FireInputController: IMKInputController {
         if event.keyCode == kVK_Delete {
             if _originalString.count > 0 {
                 _originalString = String(_originalString.dropLast())
+                // 整句：删键后证据作废（会话保留，继续敲可重新积累）
+                if _sentenceActive || Defaults[.enableSentenceMode] {
+                    SentenceEngine.shared.evidenceInvalidated(_sentenceSession)
+                }
                 return true
             }
             return false
@@ -585,11 +616,53 @@ class FireInputController: IMKInputController {
         }
         // 当前输入的是英文字符,附加到之前
         if match != nil {
+            // 整句：组字区编码超过上限不再吸收新键（把键交回系统）
+            if _sentenceActive && _originalString.count >= SentenceConfig.maxRawLength {
+                return nil
+            }
             _originalString += string
 
+            // 整句自动上屏：先空码型，再概率型
+            if _sentenceActive {
+                let raw = _originalString
+                if let commit = SentenceEngine.shared.keyPressed(
+                    session: _sentenceSession, raw: raw, appendedLetter: true) {
+                    autoCommitSentenceText(commit)
+                    return true
+                }
+            }
             return true
         }
         return nil
+    }
+
+    // 整句自动上屏：插入文字，组字区只保留未消费的键
+    private func autoCommitSentenceText(_ commit: SentenceAutoCommit) {
+        let text = commit.text
+        insertText(text)
+        // insertText 内部 clean() 会清空 _originalString，这里恢复未消费的尾码
+        _originalString = commit.retainedRaw
+        if commit.retainedRaw.isEmpty {
+            CandidatesWindow.shared.close()
+        }
+        notifySentenceCommit(text)
+    }
+
+    // 自动上屏计入统计，否则"统计"里会漏掉整句自动上屏的字数
+    private func notifySentenceCommit(_ text: String) {
+        let candidate = Candidate(code: text, text: text, type: .sentence)
+        if text.contains(where: { $0.isChineseChar }) {
+            Fire.shared.recentCommittedTexts.append(text)
+            if Fire.shared.recentCommittedTexts.count > 20 {
+                Fire.shared.recentCommittedTexts.removeFirst()
+            }
+        }
+        NotificationQueue.default.enqueue(
+            Notification(name: Fire.candidateInserted,
+                        object: nil,
+                        userInfo: ["candidate": candidate,
+                                  "appBundleId": client()?.bundleIdentifier() ?? ""]),
+            postingStyle: .whenIdle)
     }
 
     private func numberKeyHandlder(event: NSEvent) -> Bool? {
@@ -598,6 +671,11 @@ class FireInputController: IMKInputController {
         // 当前输入的是数字,选择当前候选列表中的第N个字符 v
         if let pos = Int(string) {
             if _originalString.count > 0 {
+                // 整句激活时数字不选候选：数字在虎整句里是写进编码的选重符，
+                // Fire 没有这个语义，吞掉以免污染词图
+                if _sentenceActive {
+                    return true
+                }
                 let index = pos - 1
                 if index >= 0 && index < _candidates.count {
                     insertCandidate(_candidates[index])
@@ -619,6 +697,9 @@ class FireInputController: IMKInputController {
     private func candidateSelectKeyHandler(event: NSEvent) -> Bool? {
         guard inputMode == .zhhans else { return nil }
         guard _originalString.count > 0 else { return nil }
+        // 整句激活时 ;/' 不选词，放行给 punctuationKeyHandler 出标点
+        // （虎整句的选重符语义在 Fire 里用 Tab 循环定位替代）
+        if _sentenceActive { return nil }
         guard Defaults[.enablePunctuationCandidateSelect] else { return nil }
         // 标点顶屏时，shift+标点键应触发顶屏而非候选选择
         if Defaults[.enablePunctuationTopScreen] && event.modifierFlags.contains(.shift) { return nil }
@@ -670,14 +751,22 @@ class FireInputController: IMKInputController {
     }
 
     private func spaceKeyHandler(event: NSEvent) -> Bool? {
-        // 空格键输入转换后的中文字符
+        // 空格键输入转换后的中文字符（整句时上屏当前高亮候选）
         if event.keyCode == kVK_Space && _originalString.count > 0 {
-            if let first = self._candidates.first {
-                insertCandidate(first)
+            if let selected = sentenceSelectedCandidate() {
+                insertCandidate(selected)
             }
             return true
         }
         return nil
+    }
+
+    /// 当前应上屏的候选：整句激活时为高亮项，否则为首选
+    private func sentenceSelectedCandidate() -> Candidate? {
+        if _sentenceActive, _sentenceHighlightIndex < _candidates.count {
+            return _candidates[_sentenceHighlightIndex]
+        }
+        return _candidates.first
     }
 
 private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
@@ -702,6 +791,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
               let string = event.characters else {
             return nil
         }
+        // 整句激活时额外选择键不选词（虎整句用 Tab 循环定位）
+        if _sentenceActive { return nil }
 
         let mode = Defaults[.extraCandidateSelectKeys]
         guard mode != .disabled else { return nil }
@@ -762,8 +853,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             && _originalString.first != DictManager.shared.tempEnTriggerPunctuation
             && PunctuationConversion.shared.conversion(punctuationInput) != nil {
             let converted = PunctuationConversion.shared.conversion(punctuationInput) ?? punctuationInput
-            if let first = _candidates.first, first.type != .placeholder {
-                insertText(first.text + converted)
+            if let selected = sentenceSelectedCandidate(), selected.type != .placeholder {
+                insertText(selected.text + converted)
             } else {
                 insertText(_originalString + converted)
             }
@@ -774,9 +865,9 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         if inputMode == .zhhans, let result = PunctuationConversion.shared.conversion(punctuationInput) {
             if _originalString.count > 0,
                !isTempEnModeActive(),
-               let first = _candidates.first,
-               first.type != .placeholder {
-                insertCandidate(first)
+               let selected = sentenceSelectedCandidate(),
+               selected.type != .placeholder {
+                insertCandidate(selected)
                 insertText(result)
             } else {
                 insertText(result)
@@ -818,6 +909,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             flagChangedHandler,
             enModeHandler,
             predictorHandler,
+            tabKeyHandler,
             pageKeyHandler,
             deleteKeyHandler,
             charKeyHandler,
@@ -839,11 +931,13 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             if pyQuery.isEmpty {
                 _candidates = []
                 _hasNext = false
+                _sentenceActive = false
                 return
             }
             let (candidates, hasNext) = DictManager.shared.getReverseLookupCandidates(query: pyQuery, page: curPage)
             _candidates = candidates
             _hasNext = hasNext
+            _sentenceActive = false
             return
         }
 
@@ -877,13 +971,63 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                 }
                 _candidates = merged
                 _hasNext = suffixHasNext
+                _sentenceActive = false
                 return
             }
         }
 
+        // 整句分支：可用时候选栏全部来自整句引擎（z键重复上屏等特例除外）
+        if Defaults[.enableSentenceMode] {
+            SentenceEngine.shared.prepareIfNeeded()
+            if sentenceBranchAllowed() {
+                // 词表换代或设置变更（整句/自动上屏开关）后重置会话
+                if _sentenceSession.engineEpoch != SentenceEngine.shared.epoch {
+                    SentenceEngine.shared.resetSession(_sentenceSession)
+                    _sentenceSession.engineEpoch = SentenceEngine.shared.epoch
+                    _sentenceSession.lexiconGeneration = SentenceLexicon.shared.generation
+                }
+                if let result = SentenceEngine.shared.candidates(
+                    session: _sentenceSession, raw: _originalString) {
+                    _candidates = result.candidates.map { completed in
+                        Candidate(code: completed.segmented.isEmpty ? _originalString : completed.segmented,
+                                  text: completed.text,
+                                  type: .sentence)
+                    }
+                    _hasNext = false
+                    _sentenceActive = true
+                    if _sentenceHighlightIndex >= _candidates.count {
+                        _sentenceHighlightIndex = max(0, _candidates.count - 1)
+                    }
+                    return
+                }
+            }
+        }
+        _sentenceActive = false
+
         let (candidates, hasNext) = Fire.shared.getCandidates(origin: self._originalString, page: curPage)
         _candidates = candidates
         _hasNext = hasNext
+    }
+
+    /// 整句候选分支是否可用：开关 + 引擎可用 + 不落入各特例早退分支
+    private func sentenceBranchAllowed() -> Bool {
+        guard Defaults[.enableSentenceMode] else { return false }
+        guard _originalString.first != "`" else { return false }
+        guard !isTempEnModeActive() else { return false }
+        if Defaults[.zKeyRepeat] && _originalString == "z" { return false }
+        return SentenceEngine.shared.available
+    }
+
+    /// Tab / Shift+Tab 循环定位整句候选
+    private func tabKeyHandler(event: NSEvent) -> Bool? {
+        guard event.keyCode == kVK_Tab, inputMode == .zhhans else { return nil }
+        guard _sentenceActive, _candidates.count > 1 else { return nil }
+        // 与虎整句一致：手动选候选时挂起自动上屏
+        SentenceEngine.shared.suspendAutoCommit(_sentenceSession)
+        let step = event.modifierFlags.contains(.shift) ? -1 : 1
+        _sentenceHighlightIndex = (_sentenceHighlightIndex + step + _candidates.count) % _candidates.count
+        refreshCandidatesWindow()
+        return true
     }
 
     // 更新候选窗口
@@ -905,7 +1049,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         CandidatesWindow.shared.setCandidates(
             candidatesData,
             originalString: _originalString,
-            topLeft: getOriginPoint()
+            topLeft: getOriginPoint(),
+            highlightIndex: _sentenceActive ? _sentenceHighlightIndex : 0
         )
         // 候选词更新后重新 mark，确保「显示首选项」模式下文本区显示当前首选
         if !Defaults[.showCodeInWindow] && Defaults[.codeInWindowMode] == .firstCandidate {
@@ -998,6 +1143,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
     }
 
     private func shouldAutoCommitCandidate() -> Bool {
+        // 整句激活：所有顶屏/空码顶字规则失效，上屏完全交给整句引擎
+        if _sentenceActive { return false }
         if _originalString.first == DictManager.shared.tempEnTriggerPunctuation { return false }
         if _originalString.first == "`" { return false }
         let mode = Defaults[.commitMode]
@@ -1102,6 +1249,10 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         curPage = 1
         _pendingDeleteCandidate = nil
         _combineCount = nil
+        _sentenceActive = false
+        _sentenceHighlightIndex = 0
+        // 整句会话整体重置（空格/回车/Esc/上屏都走到这里）
+        SentenceEngine.shared.resetSession(_sentenceSession)
         CandidatesWindow.shared.close()
     }
 

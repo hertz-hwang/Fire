@@ -27,6 +27,8 @@ struct GeneralPane: View {
     @Default(.inputModeTipWindowType) private var inputModeTipWindowType
     @Default(.zKeyQuery) private var zKeyQuery
     @Default(.zKeyRepeat) private var zKeyRepeat
+    @Default(.enableSentenceMode) private var enableSentenceMode
+    @Default(.enableSentenceAutoCommit) private var enableSentenceAutoCommit
     @Default(.toggleInputModeKey) private var toggleInputModeKey
     @Default(.disableEnMode) private var disableEnMode
     @Default(.disableTempEnMode) private var disableTempEnMode
@@ -54,11 +56,16 @@ struct GeneralPane: View {
                                 Spacer(minLength: 50)
                             }
                             HStack {
+                                Toggle("整句", isOn: $enableSentenceMode)
+                                Spacer(minLength: 50)
+                            }
+                            HStack {
                                 Picker("最大码长", selection: $maxCodeLength) {
                                     ForEach(3...9, id: \.self) { n in
                                         Text("\(n)").tag(n)
                                     }
                                 }
+                                .disabled(enableSentenceMode)
                                 Spacer(minLength: 20)
                                 Picker("上屏模式", selection: $commitMode) {
                                     Text("空格上屏").tag(CommitMode.spaceCommit)
@@ -69,9 +76,16 @@ struct GeneralPane: View {
                                     Text("\(chineseNumber(maxCodeLength + 1))二顶").tag(CommitMode.commitAtM2)
                                     Text("\(chineseNumber(maxCodeLength + 1))三顶").tag(CommitMode.commitAtM3)
                                 }
+                                .disabled(enableSentenceMode)
                                 Spacer(minLength: 50)
                             }
-                            if commitMode == .emptyCodeDirect {
+                            if enableSentenceMode {
+                                HStack {
+                                    Toggle("自动上屏", isOn: $enableSentenceAutoCommit)
+                                    Spacer(minLength: 50)
+                                }
+                            }
+                            if commitMode == .emptyCodeDirect && !enableSentenceMode {
                                 HStack {
                                     Text("上屏延迟")
                                     Slider(value: $emptyCodeDirectDelay, in: 0.1...1.0, step: 0.1) {
@@ -88,6 +102,8 @@ struct GeneralPane: View {
                             }
                             HStack {
                                 Toggle("z键查询", isOn: $zKeyQuery)
+                                    // 整句走精确码边，没有 xxx* 通配查询的余地
+                                    .disabled(enableSentenceMode)
                                 Spacer(minLength: 50)
                             }
                             HStack {
@@ -147,6 +163,8 @@ struct GeneralPane: View {
                                     Text("出简无全").tag(JianQuanMode.noQuanIfJian)
                                 }
                                 .frame(width: 200, alignment: .leading)
+                                // 整句用精确码边，简全让位在整句下没有作用对象
+                                .disabled(enableSentenceMode)
                                 Spacer()
                             }
                         }

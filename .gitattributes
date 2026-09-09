@@ -1,2 +1,2 @@
 sqlcipher/** linguist-vendored
-Fire/SQLCipher/** linguist-generated
+Fire/Resources/sentence-ngram-mobile.bin filter=lfs diff=lfs merge=lfs -text

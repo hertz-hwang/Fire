@@ -239,7 +239,7 @@ class Statistics {
         var binds: [String] = []
         if let type = type {
             switch type {
-            case "wb", "py", "user", "placeholder":
+            case "wb", "py", "user", "placeholder", "sentence":
                 conditions.append("type = ?")
                 binds.append(type)
             default:
@@ -472,7 +472,7 @@ class Statistics {
         switch type {
         case "all":
             bindType = false
-        case "wb", "py", "user", "placeholder":
+        case "wb", "py", "user", "placeholder", "sentence":
             conditions.append("type = ?")
             bindType = true
         default:
@@ -531,7 +531,7 @@ class Statistics {
         switch type {
         case "all":
             bindType = false
-        case "wb", "py", "user", "placeholder":
+        case "wb", "py", "user", "placeholder", "sentence":
             conditions.append("type = ?")
             bindType = true
         default:
@@ -973,7 +973,7 @@ class Statistics {
     func exportInputDetailsCSV(to url: URL, typeFilter: String = "all", hourFilter: Int? = nil) throws {
         var conditions: [String] = []
         switch typeFilter {
-        case "wb", "py", "user", "placeholder":
+        case "wb", "py", "user", "placeholder", "sentence":
             conditions.append("type = '\(typeFilter)'")
         default:
             break

@@ -17,6 +17,9 @@ struct ThesaurusPane: View {
     @Default(.charDivTablePath) private var charDivTablePath
     @Default(.charDivRootFontName) private var charDivRootFontName
 
+    @State private var modelLoaded: Bool = false
+    @State private var modelStatus: String = "未加载"
+
     private let availableFontFamilies = NSFontManager.shared.availableFontFamilies
 
     private func selectFile() -> String? {
@@ -113,12 +116,41 @@ struct ThesaurusPane: View {
                                 .frame(width: 200)
                                 Spacer()
                             }
+                            HStack {
+                                Group {
+                                    Text("整句模型: ")
+                                    Text(modelStatus)
+                                        .lineLimit(2)
+                                        .padding(.horizontal, 6)
+                                        .truncationMode(.middle)
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.white)
+                                        .background(modelLoaded
+                                                    ? Color(.displayP3, red: 0.5, green: 0.5, blue: 0.5, opacity: 1)
+                                                    : Color(.displayP3, red: 0.7, green: 0.3, blue: 0.3, opacity: 1))
+                                        .cornerRadius(4)
+                                }
+                                Spacer()
+                                Button("重新载入") {
+                                    DispatchQueue.global(qos: .userInitiated).async {
+                                        NgramModel.shared.reload()
+                                        let loaded = NgramModel.shared.loaded
+                                        let status = NgramModel.shared.statusText()
+                                        DispatchQueue.main.async {
+                                            modelLoaded = loaded
+                                            modelStatus = status
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     Button(action: {
                         DictManager.shared.close()
                         buildDict()
                         DictManager.shared.reinit()
+                        // 整句词图跟随词库重建
+                        SentenceLexicon.shared.markDirty()
                     }, label: {
                         Text("建立索引")
                     })

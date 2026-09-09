@@ -27,6 +27,15 @@ class DictManager {
             self.prepareStatement()
         }
         .tieToLifetime(of: self)
+        // 整句词图跟随编码模式/词库变化
+        Defaults.observe(keys: .codeMode) { () in
+            SentenceLexicon.shared.markDirty()
+        }
+        .tieToLifetime(of: self)
+        NotificationCenter.default.addObserver(
+            forName: DictManager.userDictUpdated, object: nil, queue: .main) { _ in
+            SentenceLexicon.shared.markDirty()
+        }
     }
     deinit {
         close()

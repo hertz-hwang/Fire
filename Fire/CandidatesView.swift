@@ -91,6 +91,8 @@ struct CandidatesView: View {
     var origin: String
     var hasPrev: Bool = false
     var hasNext: Bool = false
+    /// 高亮候选下标（整句模式 Tab/方向键循环选词），默认 0
+    var highlightIndex: Int = 0
 
     @Default(.candidatesDirection) private var direction
     @Default(.themeConfig) private var themeConfig
@@ -103,7 +105,7 @@ struct CandidatesView: View {
                 candidate: candidate,
                 index: index,
                 origin: origin,
-                selected: index == 0,
+                selected: index == highlightIndex,
                 indexVisible: candidates.count > 1
             )
         }

@@ -106,6 +106,12 @@ extension Defaults.Keys {
     static let maxCodeLength = Key<Int>("maxCodeLength", default: 4)
     static let commitMode = Key<CommitMode>("commitMode", default: CommitMode.spaceCommit)
     static let emptyCodeDirectDelay = Key<Double>("emptyCodeDirectDelay", default: 0.3)
+    // 整句模式（参考虎整句）：开启后最大码长/上屏模式失效，候选栏只出整句候选
+    static let enableSentenceMode = Key<Bool>("enableSentenceMode", default: false)
+    // 整句自动上屏：概率型提前上屏 + 空码自动上屏
+    static let enableSentenceAutoCommit = Key<Bool>("enableSentenceAutoCommit", default: true)
+    // 整句 n-gram 模型覆盖路径（空表示用内置 Resources 里的模型）
+    static let sentenceModelPath = Key<String>("sentenceModelPath", default: "")
     static let enablePunctuationCandidateSelect = Key<Bool>(
         "enablePunctuationCandidateSelect",
         default: false
@@ -212,6 +218,7 @@ enum CandidateType: String {
     case py // 拼音
     case user // 用户词库
     case placeholder // 运行时类型，无匹配时表示占位
+    case sentence // 整句候选（自动上屏与整句选择都计入统计）
 }
 
 struct Candidate: Hashable {

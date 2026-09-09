@@ -65,6 +65,12 @@
 		910DF3B32F6273D000EDA24D /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 67C9A05A2AB5445E000B5281 /* Security.framework */; };
 		91A475092F62847B0047EEBC /* liuli_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = 91A475082F62847B0047EEBC /* liuli_table.txt */; };
 		91A4750C2F62847B0047EEBC /* xiaoxiang_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = 91A4750D2F62847B0047EEBC /* xiaoxiang_table.txt */; };
+		AA5E0001000000000SENT001 /* NgramModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0001000000000SENT101 /* NgramModel.swift */; };
+		AA5E0002000000000SENT002 /* SentenceLexicon.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0002000000000SENT102 /* SentenceLexicon.swift */; };
+		AA5E0003000000000SENT003 /* SentenceDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0003000000000SENT103 /* SentenceDecoder.swift */; };
+		AA5E0004000000000SENT004 /* SentenceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0004000000000SENT104 /* SentenceEngine.swift */; };
+		AA5E0005000000000SENT005 /* SentenceTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0005000000000SENT105 /* SentenceTypes.swift */; };
+		AA5E0006000000000SENT006 /* sentence-ngram-mobile.bin in Resources */ = {isa = PBXBuildFile; fileRef = AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -140,6 +146,12 @@
 		67F0B0D22AFFC282006F835D /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
 		91A475082F62847B0047EEBC /* liuli_table.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = liuli_table.txt; sourceTree = "<group>"; };
 		91A4750D2F62847B0047EEBC /* xiaoxiang_table.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = xiaoxiang_table.txt; sourceTree = "<group>"; };
+		AA5E0001000000000SENT101 /* NgramModel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NgramModel.swift; sourceTree = "<group>"; };
+		AA5E0002000000000SENT102 /* SentenceLexicon.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceLexicon.swift; sourceTree = "<group>"; };
+		AA5E0003000000000SENT103 /* SentenceDecoder.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceDecoder.swift; sourceTree = "<group>"; };
+		AA5E0004000000000SENT104 /* SentenceEngine.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceEngine.swift; sourceTree = "<group>"; };
+		AA5E0005000000000SENT105 /* SentenceTypes.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceTypes.swift; sourceTree = "<group>"; };
+		AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */ = {isa = PBXFileReference; lastKnownFileType = file; path = "sentence-ngram-mobile.bin"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -241,6 +253,7 @@
 				67C9A0042AB53E83000B5281 /* StatusBar.swift */,
 				67C9A0082AB53E83000B5281 /* types.swift */,
 				67C9A0032AB53E83000B5281 /* Utils.swift */,
+				AA5E0007000000000SENTG07 /* Sentence */,
 				67C99FF82AB53E62000B5281 /* Utils */,
 				67C99FEB2AB53DB2000B5281 /* AppDelegate.swift */,
 				67C99FF22AB53DB4000B5281 /* Fire.entitlements */,
@@ -297,6 +310,7 @@
 				67C9A0202AB53ED3000B5281 /* py_table.txt */,
 				F19CED7AB5B1DBD756937732 /* ll_div.txt */,
 				67C9A0212AB53ED3000B5281 /* wb_98_table.txt */,
+				AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -341,6 +355,18 @@
 				67C9A05A2AB5445E000B5281 /* Security.framework */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		AA5E0007000000000SENTG07 /* Sentence */ = {
+			isa = PBXGroup;
+			children = (
+				AA5E0005000000000SENT105 /* SentenceTypes.swift */,
+				AA5E0001000000000SENT101 /* NgramModel.swift */,
+				AA5E0002000000000SENT102 /* SentenceLexicon.swift */,
+				AA5E0003000000000SENT103 /* SentenceDecoder.swift */,
+				AA5E0004000000000SENT104 /* SentenceEngine.swift */,
+			);
+			path = Sentence;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -445,6 +471,7 @@
 				4572854E2BD0EAF90048D67E /* Credits.html in Resources */,
 				91A475092F62847B0047EEBC /* liuli_table.txt in Resources */,
 				91A4750C2F62847B0047EEBC /* xiaoxiang_table.txt in Resources */,
+				AA5E0006000000000SENT006 /* sentence-ngram-mobile.bin in Resources */,
 				67C9A00D2AB53E83000B5281 /* fire.pdf in Resources */,
 				67C9A0392AB53ED3000B5281 /* wb_98_table.txt in Resources */,
 				67C9A0092AB53E83000B5281 /* MainMenu.xib in Resources */,
@@ -470,6 +497,11 @@
 			files = (
 				67C9A03A2AB53ED3000B5281 /* FireInputServer.swift in Sources */,
 				67C9A00F2AB53E83000B5281 /* FireInputController.swift in Sources */,
+				AA5E0001000000000SENT001 /* NgramModel.swift in Sources */,
+				AA5E0002000000000SENT002 /* SentenceLexicon.swift in Sources */,
+				AA5E0003000000000SENT003 /* SentenceDecoder.swift in Sources */,
+				AA5E0004000000000SENT004 /* SentenceEngine.swift in Sources */,
+				AA5E0005000000000SENT005 /* SentenceTypes.swift in Sources */,
 				67C99FEC2AB53DB2000B5281 /* AppDelegate.swift in Sources */,
 				67C9A00A2AB53E83000B5281 /* InputSource.swift in Sources */,
 				67C9A0352AB53ED3000B5281 /* ThemeConfig.swift in Sources */,

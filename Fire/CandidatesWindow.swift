@@ -34,12 +34,14 @@ class CandidatesWindow: NSWindow, NSWindowDelegate {
     func setCandidates(
         _ candidatesData: CandidatesData,
         originalString: String,
-        topLeft: NSPoint
+        topLeft: NSPoint,
+        highlightIndex: Int = 0
     ) {
         hostingView.rootView.candidates = candidatesData.list
         hostingView.rootView.origin = originalString
         hostingView.rootView.hasNext = candidatesData.hasNext
         hostingView.rootView.hasPrev = candidatesData.hasPrev
+        hostingView.rootView.highlightIndex = highlightIndex
         fireLog("origin top left: \(topLeft)")
         fireLog("candidates: \(candidatesData)")
         self.setFrameTopLeftPoint(topLeft)
