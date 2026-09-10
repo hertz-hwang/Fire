@@ -31,7 +31,6 @@ class UserDictTextModel: ObservableObject {
 
 struct UserDictPane: View {
     @StateObject private var userDictTextModel = UserDictTextModel()
-    @State private var saved = false
 
     private func exportDict() {
         let panel = NSSavePanel()
@@ -90,18 +89,8 @@ struct UserDictPane: View {
                             exportDict()
                         }
                         Spacer()
-                        if #available(macOS 12.0, *) {
-                            Button("保存") {
-                                DictManager.shared.updateUserDict(userDictTextModel.text)
-                                saved = true
-                            }
-                            .alert("保存成功", isPresented: $saved) {
-                            }
-                        } else {
-                            Button("保存") {
-                                DictManager.shared.updateUserDict(userDictTextModel.text)
-                                print("saved")
-                            }
+                        Button("保存") {
+                            DictManager.shared.updateUserDict(userDictTextModel.text)
                         }
                     }
                 } else {

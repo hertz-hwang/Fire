@@ -655,10 +655,14 @@ class FireInputController: IMKInputController {
             }
             _originalString += string
 
-            // 整句自动上屏：先空码型，再概率型
+            // 整句自动上屏：先空码型，再概率型。
+            // 保护用户自定义短语：当前编码仍是某个用户码的前缀（如还没打完
+            // `date`）时不自动上屏，等编码完整命中后置顶让用户选择。
             if _sentenceActive {
                 let raw = _originalString
-                if let commit = SentenceEngine.shared.keyPressed(
+                if DictManager.shared.hasUserDictPrefix(matching: raw) {
+                    SentenceEngine.shared.evidenceInvalidated(_sentenceSession)
+                } else if let commit = SentenceEngine.shared.keyPressed(
                     session: _sentenceSession, raw: raw, appendedLetter: true) {
                     autoCommitSentenceText(commit)
                     return true
@@ -1045,11 +1049,22 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                     if curPage > pageCount { curPage = pageCount }
                     let start = (curPage - 1) * pageSize
                     let pageItems = Array(all[start..<min(start + pageSize, all.count)])
-                    _candidates = pageItems.map { completed in
+                    var list = pageItems.map { completed in
                         Candidate(code: completed.segmented.isEmpty ? _originalString : completed.segmented,
                                   text: completed.text,
                                   type: .sentence)
                     }
+                    // 编码完整命中用户自定义短语（如 `date {yyyy}{MM}{dd}`）时置顶，
+                    // 并挂起自动上屏——等用户显式选择，不被整句抢先提交
+                    let userMatches = DictManager.shared.getUserCandidates(matching: _originalString)
+                    if !userMatches.isEmpty {
+                        if curPage == 1 {
+                            list.insert(contentsOf: userMatches, at: 0)
+                        }
+                        // 清证据防止紧随其后的键抢先提前上屏（短语已在榜首，等显式选择）
+                        SentenceEngine.shared.evidenceInvalidated(_sentenceSession)
+                    }
+                    _candidates = list
                     _hasNext = curPage < pageCount
                     if _sentenceHighlightIndex >= _candidates.count {
                         _sentenceHighlightIndex = max(0, _candidates.count - 1)

@@ -583,6 +583,37 @@ class DictManager {
         NotificationQueue.default.enqueue(Notification(name: DictManager.userDictUpdated), postingStyle: .whenIdle)
     }
 
+    /// 编码精确匹配的用户词（含 {yyyy} 等日期变量替换），用于整句模式叠加
+    /// 自定义短语（如 `date {yyyy}{MM}{dd}`）。只做整码精确匹配：整句模式下
+    /// 候选栏归整句引擎，只有编码已被完整打全的自定义短语才值得置顶。
+    func getUserCandidates(matching query: String) -> [Candidate] {
+        guard let database = database, !query.isEmpty else { return [] }
+        let sql = "select query, text from wb_py_dict where type = '\(CandidateType.user.rawValue)' and query = ? order by id asc limit 10"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        sqlite3_bind_text(stmt, 1, query, -1, SQLITE_TRANSIENT)
+        var candidates: [Candidate] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let code = String(cString: sqlite3_column_text(stmt, 0))
+            let text = replaceTextWithVars(String(cString: sqlite3_column_text(stmt, 1)))
+            candidates.append(Candidate(code: code, text: text, type: .user))
+        }
+        return candidates
+    }
+
+    /// 是否存在以 query 为前缀（或相等）的用户码——整句自动上屏用它做保护：
+    /// 编码还可能是用户自定义短语（如 `date {yyyy}{MM}{dd}`）的前缀时不提前上屏。
+    func hasUserDictPrefix(matching query: String) -> Bool {
+        guard let database = database, !query.isEmpty else { return false }
+        let sql = "select 1 from wb_py_dict where type = '\(CandidateType.user.rawValue)' and query <> '' and query glob ? limit 1"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        sqlite3_bind_text(stmt, 1, query + "*", -1, SQLITE_TRANSIENT)
+        return sqlite3_step(stmt) == SQLITE_ROW
+    }
+
     func getUserCandidates() -> [Candidate] {
         var stmt: OpaquePointer?
         // query 为空的行是纯整句加权词条（[权重] 词条），不参与普通候选查询
