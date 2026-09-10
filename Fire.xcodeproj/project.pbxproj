@@ -69,6 +69,7 @@
 		AA5E0002000000000SENT002 /* SentenceLexicon.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0002000000000SENT102 /* SentenceLexicon.swift */; };
 		AA5E0003000000000SENT003 /* SentenceDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0003000000000SENT103 /* SentenceDecoder.swift */; };
 		AA5E0004000000000SENT004 /* SentenceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0004000000000SENT104 /* SentenceEngine.swift */; };
+		AA5E0008000000000SENT008 /* SentenceSupplement.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0008000000000SENT108 /* SentenceSupplement.swift */; };
 		AA5E0005000000000SENT005 /* SentenceTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0005000000000SENT105 /* SentenceTypes.swift */; };
 		AA5E0006000000000SENT006 /* sentence-ngram-mobile.bin in Resources */ = {isa = PBXBuildFile; fileRef = AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */; };
 		AA5E0007000000000SENT007 /* sentence-codes-liuli.txt in Resources */ = {isa = PBXBuildFile; fileRef = AA5E0007000000000SENT107 /* sentence-codes-liuli.txt */; };
@@ -151,6 +152,7 @@
 		AA5E0002000000000SENT102 /* SentenceLexicon.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceLexicon.swift; sourceTree = "<group>"; };
 		AA5E0003000000000SENT103 /* SentenceDecoder.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceDecoder.swift; sourceTree = "<group>"; };
 		AA5E0004000000000SENT104 /* SentenceEngine.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceEngine.swift; sourceTree = "<group>"; };
+		AA5E0008000000000SENT108 /* SentenceSupplement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentenceSupplement.swift; sourceTree = "<group>"; };
 		AA5E0005000000000SENT105 /* SentenceTypes.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceTypes.swift; sourceTree = "<group>"; };
 		AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */ = {isa = PBXFileReference; lastKnownFileType = file; path = "sentence-ngram-mobile.bin"; sourceTree = "<group>"; };
 		AA5E0007000000000SENT107 /* sentence-codes-liuli.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "sentence-codes-liuli.txt"; sourceTree = "<group>"; };
@@ -368,6 +370,7 @@
 				AA5E0002000000000SENT102 /* SentenceLexicon.swift */,
 				AA5E0003000000000SENT103 /* SentenceDecoder.swift */,
 				AA5E0004000000000SENT104 /* SentenceEngine.swift */,
+				AA5E0008000000000SENT108 /* SentenceSupplement.swift */,
 			);
 			path = Sentence;
 			sourceTree = "<group>";
@@ -505,6 +508,7 @@
 				AA5E0002000000000SENT002 /* SentenceLexicon.swift in Sources */,
 				AA5E0003000000000SENT003 /* SentenceDecoder.swift in Sources */,
 				AA5E0004000000000SENT004 /* SentenceEngine.swift in Sources */,
+				AA5E0008000000000SENT008 /* SentenceSupplement.swift in Sources */,
 				AA5E0005000000000SENT005 /* SentenceTypes.swift in Sources */,
 				67C99FEC2AB53DB2000B5281 /* AppDelegate.swift in Sources */,
 				67C9A00A2AB53E83000B5281 /* InputSource.swift in Sources */,

@@ -112,7 +112,7 @@ extension Defaults.Keys {
     static let enableSentenceMode = Key<Bool>("enableSentenceMode", default: false)
     // 整句自动上屏：概率型提前上屏 + 空码自动上屏
     static let enableSentenceAutoCommit = Key<Bool>("enableSentenceAutoCommit", default: true)
-    // 单字单码组句（虎整句 tiger_sentence_allow_duplicate_single）：
+    // 单字重码组句（虎整句 tiger_sentence_allow_duplicate_single）：
     // 开启时分段路径允许同码非首选单字参与组句；多字非首选仍需显式选重
     static let enableSentenceAllowDuplicateSingle = Key<Bool>("enableSentenceAllowDuplicateSingle", default: true)
     // 整句 n-gram 模型覆盖路径（空表示用内置 Resources 里的模型）

@@ -597,17 +597,14 @@ class FireInputController: IMKInputController {
     }
 
     /// 整句候选翻页（-/= 与候选窗翻页按钮共用）；高亮落到新页首个候选。
+    /// -/= 只翻页：已在边缘页时不做任何事（页内循环归 Tab/方向键管）。
     /// curPage 的 didSet 会触发 refreshCandidatesWindow，句柄分支按页重组候选。
     private func sentencePage(step: Int) {
         SentenceEngine.shared.suspendAutoCommit(_sentenceSession)
         let pageSize = max(1, Defaults[.candidateCount])
         let pageCount = max(1, (_sentenceTotalCount + pageSize - 1) / pageSize)
-        let target = min(max(1, curPage + step), pageCount)
-        guard target != curPage else {
-            // 已在边缘页：回绕为页内高亮循环，保持按键总有反馈
-            cycleSentenceHighlight(step: step)
-            return
-        }
+        let target = curPage + step
+        guard target >= 1, target <= pageCount, target != curPage else { return }
         _sentenceHighlightIndex = 0
         curPage = target
     }

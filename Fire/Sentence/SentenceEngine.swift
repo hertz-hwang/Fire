@@ -73,6 +73,10 @@ final class SentenceEngine {
     private var lexiconObserver: Any?
 
     private init() {
+        // supplement 词源 = 用户词库中带权重的词条（`[权重] 词条` 行）
+        SentenceSupplement.shared.entriesProvider = {
+            DictManager.shared.getUserSupplementEntries()
+        }
         epochObserver = Defaults.observe(keys: .enableSentenceMode, .enableSentenceAutoCommit,
                                          .codeMode, .sentenceModelPath) { [weak self] in
             guard let self = self else { return }
@@ -80,7 +84,7 @@ final class SentenceEngine {
             SentenceLexicon.shared.markDirty()
         }
         .tieToLifetime(of: self)
-        // 单字单码组句只改边资格不改词表：重置会话但别把词表打脏重建
+        // 单字重码组句只改边资格不改词表：重置会话但别把词表打脏重建
         duplicateObserver = Defaults.observe(keys: .enableSentenceAllowDuplicateSingle) { [weak self] in
             guard let self = self else { return }
             self.epoch += 1
@@ -217,7 +221,12 @@ final class SentenceEngine {
         }
         session.lastSeenRaw = raw
 
-        // 榜首带补充词奖励时，只接受它的文字前缀（supplement 未移植，恒为 0）
+        // 榜首带 supplement 奖励时，只接受它的文字前缀（虎整句 accepted_top：
+        // 加权新词保护期内不被其它分歧前缀提前截走）
+        var acceptedTop: String? = nil
+        if let top = result.candidates.first, top.supplementScore > 0 {
+            acceptedTop = top.text
+        }
         let mergedIncompleteTail = evidence.mergedIncompleteTail
         var qualifying: [String: SentencePrefixEvidence] = [:]
         for prefix in evidence.prefixes {
@@ -226,6 +235,9 @@ final class SentenceEngine {
             if prefix.rawLength <= 0 || prefix.rawLength >= raw.count { continue }
             if prefix.textCharCount <= 0 { continue }
             if !mergedIncompleteTail && !prefixBelongsToVisible(prefix, result.candidates) {
+                continue
+            }
+            if let acceptedTop = acceptedTop, !acceptedTop.hasPrefix(prefix.text) {
                 continue
             }
             qualifying[prefix.text + "\u{1F}" + String(prefix.rawLength)] = prefix

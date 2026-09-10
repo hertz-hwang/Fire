@@ -79,6 +79,9 @@ struct UserDictPane: View {
                         .font(Font.system(size: 12))
                     Text("4. 候选项可使用{yyyy}/{MM}/{dd}/{HH}/{mm}/{ss}代替当前年/月/日/时/分/秒")
                         .font(Font.system(size: 12))
+                    Text("5. 行首可加权重：「[权重] 编码 词条1 词条2 ……」（权重省略时默认1000）。整句模式下，带权重词条按权重提升组句得分，用于新词/流行词/个人常用词；「权重 词条」（无编码）只参与整句加权，不出普通候选")
+                        .font(Font.system(size: 12))
+                        .fixedSize(horizontal: false, vertical: true)
                     HStack {
                         Button("导入") {
                             importDict()

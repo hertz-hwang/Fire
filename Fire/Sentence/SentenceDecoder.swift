@@ -31,9 +31,14 @@ final class SentenceState {
     let previous: SentenceState?
     let rawLength: Int
     let edgeCount: Int
+    /// supplement 匹配器状态（虎整句 supplement_state，节点索引；整段奖励
+    /// 进 score 不进 massScore）
+    var supplementState: Int
+    var supplementScore: Double
 
     init(score: Double, massScore: Double, text: String, prev2: UInt32, prev1: UInt32,
-         maxRank: Int, previous: SentenceState?, rawLength: Int, edgeCount: Int) {
+         maxRank: Int, previous: SentenceState?, rawLength: Int, edgeCount: Int,
+         supplementState: Int = 0, supplementScore: Double = 0) {
         self.score = score
         self.massScore = massScore
         self.text = text
@@ -43,6 +48,8 @@ final class SentenceState {
         self.previous = previous
         self.rawLength = rawLength
         self.edgeCount = edgeCount
+        self.supplementState = supplementState
+        self.supplementScore = supplementScore
     }
 }
 
@@ -301,6 +308,7 @@ final class SentenceBucket {
 final class SentenceDecoder {
     private let model = NgramModel.shared
     private let lexicon = SentenceLexicon.shared
+    private let supplement = SentenceSupplement.shared
 
     /// 增量 lattice 缓存
     private var cachedRaw: [UInt8] = []
@@ -394,15 +402,25 @@ final class SentenceDecoder {
                                             allowDuplicateSingle: allowDuplicateSingle)
                 if selected.isEmpty { continue }
 
+                let hasSupplements = supplement.hasEntries
                 for item in current.items {
                     for edge in selected {
                         var score = item.score
                         var prev2 = item.prev2
                         var prev1 = item.prev1
+                        var supState = item.supplementState
+                        var supAdded = 0.0
                         let edgeScalars = scalarsOf(edge.text)
-                        for scalar in edgeScalars {
+                        let edgeChars = edge.text.map { $0 }
+                        for (ci, scalar) in edgeScalars.enumerated() {
                             score += logp(prev2: prev2, prev1: prev1, target: scalar)
                             score += SentenceConfig.emittedCharacterReward
+                            if hasSupplements {
+                                let step = supplement.advance(state: supState, edgeChars[ci])
+                                supState = step.state
+                                score += step.reward
+                                supAdded += step.reward
+                            }
                             prev2 = prev1
                             prev1 = scalar
                         }
@@ -412,10 +430,14 @@ final class SentenceDecoder {
                         }
                         // 整码最优单字奖励只加在 score，不进 massScore（置信度）
                         var massDelta = score - item.score
+                        var singleRewardAdded = 0.0
                         if wholeInputEdge && selector.rank == 0
                             && edge.optimalSingle && edgeScalars.count == 1 {
-                            score += SentenceConfig.wholeInputSingleCharacterReward
-                            massDelta = score - item.score - SentenceConfig.wholeInputSingleCharacterReward
+                            singleRewardAdded = SentenceConfig.wholeInputSingleCharacterReward
+                            score += singleRewardAdded
+                            massDelta = score - item.score - supAdded - singleRewardAdded
+                        } else {
+                            massDelta -= supAdded
                         }
                         let state = SentenceState(
                             score: score,
@@ -425,7 +447,9 @@ final class SentenceDecoder {
                             maxRank: Swift.max(item.maxRank, edge.rank),
                             previous: item,
                             rawLength: consumedEnd,
-                            edgeCount: item.edgeCount + 1)
+                            edgeCount: item.edgeCount + 1,
+                            supplementState: supState,
+                            supplementScore: item.supplementScore + supAdded)
                         let bucket = buckets[consumedEnd] ?? SentenceBucket()
                         bucket.append(state)
                         buckets[consumedEnd] = bucket
@@ -443,7 +467,7 @@ final class SentenceDecoder {
             score: item.score + endingAdjustment,
             confidenceScore: item.massScore + endingAdjustment,
             text: item.text,
-            supplementScore: 0.0,
+            supplementScore: item.supplementScore,
             maxRank: Swift.max(1, item.maxRank),
             edgeCount: item.edgeCount,
             rawLength: item.rawLength,
@@ -484,7 +508,7 @@ final class SentenceDecoder {
             all.append(candidate)
         }
 
-        // 单字单码组句开 + 分段路径 → 分数竞争；否则保持词库序
+        // 单字重码组句开 + 分段路径 → 分数竞争；否则保持词库序
         // （Lua prefer_score_over_lexicon_rank：allow 关时恒 rank-first）
         let hasSegmentedPath = all.contains {
             $0.path.previous != nil && $0.path.previous!.rawLength > 0
@@ -688,12 +712,14 @@ final class SentenceDecoder {
         }
         let length = raw.count
 
-        // 词表换代 / 单字单码开关变更后旧 lattice 失效，整体重解码
+        // 词表换代 / 单字单码开关变更后旧 lattice 失效，整体重解码；
+        // supplement 加权词（用户词库）与词表同代刷新，保证两者不会错代混用
         if lexicon.generation != cachedLexiconGeneration || cachedAllowDuplicate != allowDuplicate {
             cachedRaw = []
             cachedBuckets = []
             cachedLexiconGeneration = lexicon.generation
             cachedAllowDuplicate = allowDuplicate
+            supplement.refresh()
         }
 
         let signpostID = OSSignpostID(log: .sentence)

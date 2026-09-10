@@ -87,7 +87,7 @@ struct GeneralPane: View {
                                     Spacer(minLength: 50)
                                 }
                                 HStack {
-                                    Toggle("单字单码组句", isOn: $enableSentenceAllowDuplicateSingle)
+                                    Toggle("单字重码组句", isOn: $enableSentenceAllowDuplicateSingle)
                                     Spacer(minLength: 50)
                                 }
                             }

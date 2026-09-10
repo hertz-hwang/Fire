@@ -77,6 +77,7 @@ class DictManager {
         if database == nil {
             sqlite3_open_v2(getDatabaseURL().path, &database, SQLITE_OPEN_READWRITE, nil)
             sqlite3_exec(database, "PRAGMA case_sensitive_like=ON;", nil, nil, nil)
+            migrateUserDictWeight()
         }
         if queryStatement != nil {
             sqlite3_finalize(queryStatement)
@@ -339,7 +340,15 @@ class DictManager {
     }
 
     func prependCandidate(candidate: Candidate) -> Bool {
-        let sql = """
+        // 顶置用户词：权重置 NULL（顶置本身就是最高优先级，不叠加整句权重）
+        let sql = columnExists("weight")
+            ? """
+            insert into wb_py_dict(id, wbcode, text, type, query, weight)
+            values (
+                (select MIN(id) - 1 from wb_py_dict), :code, :text, :type, :code, NULL
+            );
+        """
+            : """
             insert into wb_py_dict(id, wbcode, text, type, query)
             values (
                 (select MIN(id) - 1 from wb_py_dict), :code, :text, :type, :code
@@ -444,42 +453,140 @@ class DictManager {
         let minId = getMinIdFromDictTable()
         // 2.2 添加对应id
         let values = candidates.enumerated().map { (n, candidate) in
-            "(\(minId - candidates.count + n), '\(candidate.code)', '\(candidate.text)', '\(candidate.type)', '\(candidate.code)')"
+            "(\(minId - candidates.count + n), '\(candidate.code)', '\(candidate.text)', '\(candidate.type)', '\(candidate.code)', NULL)"
         }.joined(separator: ",")
         let sql = """
-            insert into wb_py_dict(id, wbcode, text, type, query)
+            insert into wb_py_dict(id, wbcode, text, type, query, weight)
             values \(values)
         """
         sqlite3_exec(database, sql, nil, nil, nil)
     }
 
+    /// 用户词库批量入库（带可选权重）。code 为空的行只服务整句加权。
+    /// 注意：表在 migrate 前没有 weight 列时回退到旧列集合。
+    private func prependUserEntries(entries: [UserDictEntry]) {
+        if entries.isEmpty { return }
+        let hasWeight = columnExists("weight")
+        let minId = getMinIdFromDictTable()
+        let values = entries.enumerated().map { (n, entry) -> String in
+            let code = entry.code.replacingOccurrences(of: "'", with: "''")
+            let text = entry.text.replacingOccurrences(of: "'", with: "''")
+            if hasWeight {
+                let weightLiteral = entry.weight > 0 ? "\(entry.weight)" : "NULL"
+                return "(\(minId - entries.count + n), '\(code)', '\(text)', '\(CandidateType.user.rawValue)', '\(code)', \(weightLiteral))"
+            } else {
+                return "(\(minId - entries.count + n), '\(code)', '\(text)', '\(CandidateType.user.rawValue)', '\(code)')"
+            }
+        }.joined(separator: ",")
+        let columns = hasWeight ? "id, wbcode, text, type, query, weight" : "id, wbcode, text, type, query"
+        sqlite3_exec(database, "insert into wb_py_dict(\(columns)) values \(values)", nil, nil, nil)
+    }
+
+    private func columnExists(_ name: String) -> Bool {
+        guard let database = database else { return false }
+        var stmt: OpaquePointer?
+        defer { if let stmt = stmt { sqlite3_finalize(stmt) } }
+        guard sqlite3_prepare_v2(database, "PRAGMA table_info(wb_py_dict)", -1, &stmt, nil) == SQLITE_OK else { return false }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let col = sqlite3_column_text(stmt, 1), String(cString: col) == name { return true }
+        }
+        return false
+    }
+
+    /// 用户词权重列迁移：虎整句 supplement（词条 [权重]）并入用户词库，
+    /// 权重存在 wb_py_dict.weight（NULL/0 = 默认 1000）。老库首次打开时补列。
+    private func migrateUserDictWeight() {
+        guard let database = database else { return }
+        var stmt: OpaquePointer?
+        defer { if let stmt = stmt { sqlite3_finalize(stmt) } }
+        guard sqlite3_prepare_v2(database, "PRAGMA table_info(wb_py_dict)", -1, &stmt, nil) == SQLITE_OK else { return }
+        var hasWeight = false
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let name = sqlite3_column_text(stmt, 1), String(cString: name) == "weight" {
+                hasWeight = true
+            }
+        }
+        if !hasWeight {
+            sqlite3_exec(database, "ALTER TABLE wb_py_dict ADD COLUMN weight INTEGER", nil, nil, nil)
+            print("[DictManager] migrated: wb_py_dict.weight added")
+        }
+    }
+
+    /// 整句 supplement 查询：用户词文本 -> 权重（未设权重返回 nil）。
+    /// 与虎整句 supplement.txt 同义：文本命中即参与匹配（与编码无关）。
+    func getUserSupplementEntries() -> [(text: String, weight: Int)] {
+        guard let database = database else { return [] }
+        var result: [(String, Int)] = []
+        var stmt: OpaquePointer?
+        let sql = "select text, weight from wb_py_dict where type = '\(CandidateType.user.rawValue)' and weight is not null and weight > 0"
+        if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let text = sqlite3_column_text(stmt, 0) {
+                    result.append((String(cString: text), Int(sqlite3_column_int(stmt, 1))))
+                }
+            }
+        }
+        sqlite3_finalize(stmt)
+        return result
+    }
+
+    /// 解析用户词库文本：`[权重] 编码 词条1 词条2 ……`，兼容老格式（无权重）。
+    /// 行首首 token 是纯数字时视为整行权重（虎整句 supplement 的权重语义）；
+    /// 只有权重没有编码时（如 `600 儿婿`），编码留空——普通候选不显示它，
+    /// 整句 supplement 奖励仍生效。
+    private struct UserDictEntry {
+        let code: String
+        let text: String
+        let weight: Int
+    }
+
+    private func parseUserDict(_ dictContent: String) -> [UserDictEntry] {
+        var entries: [UserDictEntry] = []
+        for rawLine in dictContent.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("#") { continue }
+            let strs = line.split(whereSeparator: \.isWhitespace).map(String.init)
+            var weight = 0 // 0 = 未显式设置（默认 1000）
+            var tokens = strs
+            if let first = strs.first, Int(first) != nil {
+                let parsed = Int(first) ?? 0
+                if parsed > 0 {
+                    weight = parsed
+                    tokens = Array(strs.dropFirst())
+                } else {
+                    // 权重非法（0/负数）：跳过该行（虎整句同规则）
+                    continue
+                }
+            }
+            guard !tokens.isEmpty else { continue }
+            if weight > 0 && tokens.count == 1 {
+                // `600 儿婿`：数字后只剩一个 token —— 纯 supplement 词条（无编码，
+                // 普通候选不显示，整句加权生效）
+                entries.append(UserDictEntry(code: "", text: tokens[0], weight: weight))
+                continue
+            }
+            let code = tokens.first ?? ""
+            for text in tokens.dropFirst() {
+                entries.append(UserDictEntry(code: code, text: text, weight: weight))
+            }
+        }
+        return entries
+    }
+
     func updateUserDict(_ dictContent: String) {
         // 1. 先删除之前的用户词库
         sqlite3_exec(database, "delete from wb_py_dict where type = '\(CandidateType.user.rawValue)'", nil, nil, nil)
-        // 2. 添加用户词库
-        let lines = dictContent.split(whereSeparator: \.isNewline)
-        fireLog("[DictManager] updateUserDict: \(lines)");
-        let candidates = lines.map { (line) -> [Candidate] in
-            let strs = line.split(whereSeparator: \.isWhitespace)
-            fireLog("[DictManager] line: \(line), strs: \(strs)")
-            if strs.count <= 1 {
-                return []
-            }
-            let code = String(strs.first!)
-            let candidateTexts = strs[1...]
-            return candidateTexts.map { text in
-                Candidate(code: code, text: String(text), type: CandidateType.user)
-            }
-        }.reduce([] as [Candidate]) { partialResult, cur in
-            partialResult + cur
-        }
-        prependCandidates(candidates: candidates)
+        // 2. 添加用户词库（支持行首 [权重]）
+        let entries = parseUserDict(dictContent)
+        fireLog("[DictManager] updateUserDict entries: \(entries.count)")
+        prependUserEntries(entries: entries)
         NotificationQueue.default.enqueue(Notification(name: DictManager.userDictUpdated), postingStyle: .whenIdle)
     }
 
     func getUserCandidates() -> [Candidate] {
         var stmt: OpaquePointer?
-        let sql = "select query, text from wb_py_dict where type = '\(CandidateType.user.rawValue)'"
+        // query 为空的行是纯整句加权词条（[权重] 词条），不参与普通候选查询
+        let sql = "select query, text from wb_py_dict where type = '\(CandidateType.user.rawValue)' and query <> ''"
         if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
             var candidates: [Candidate] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
@@ -497,28 +604,67 @@ class DictManager {
     }
 
     func getUserDictContent() -> String {
-        // 获取用户候选词(包括调整顺序的词)
+        // 获取用户候选词(包括调整顺序的词)，格式：[权重] 编码 词条1 词条2 ……
         struct UserDictLine {
             let code: String
+            var weight: Int // 0 = 未设置
             var texts: [String]
         }
-        let candidates = getUserCandidates()
+        let candidates = getUserCandidatesWithWeight()
         fireLog("[DictManager.exportUserDictToFile] candidates: \(candidates)")
         var list: [UserDictLine] = []
         candidates.forEach { candidate in
+            if candidate.code.isEmpty {
+                // 纯加权词条：单独成行 `权重 词条`
+                if let index = list.firstIndex(where: {
+                    $0.code.isEmpty && $0.weight == candidate.weight
+                        && $0.texts.contains(candidate.text)
+                }) { return }
+                list.append(UserDictLine(code: "", weight: candidate.weight,
+                                         texts: [candidate.text]))
+                return
+            }
             let index = list.firstIndex { dictItem in
                 dictItem.code == candidate.code
             }
             if index == nil {
-                list.append(UserDictLine(code: candidate.code, texts: [candidate.text]))
+                list.append(UserDictLine(code: candidate.code, weight: candidate.weight,
+                                         texts: [candidate.text]))
             } else if !list[index!].texts.contains(candidate.text) {
                 list[index!].texts.append(candidate.text)
+                if candidate.weight > 0 && list[index!].weight == 0 {
+                    list[index!].weight = candidate.weight
+                }
             }
         }
-        let content = list.map { dictItem in
-            ([dictItem.code] + dictItem.texts).joined(separator: " ")
+        let content = list.map { dictItem -> String in
+            var parts: [String] = []
+            if dictItem.weight > 0 { parts.append("\(dictItem.weight)") }
+            if !dictItem.code.isEmpty { parts.append(dictItem.code) }
+            parts.append(contentsOf: dictItem.texts)
+            return parts.joined(separator: " ")
         }
         .joined(separator: "\n")
         return content
+    }
+
+    /// 用户候选词（带权重）。weight 列为 NULL/缺列时返回 0（未设置）。
+    private func getUserCandidatesWithWeight() -> [(code: String, text: String, weight: Int)] {
+        guard let database = database else { return [] }
+        let hasWeight = columnExists("weight")
+        let sql = hasWeight
+            ? "select query, text, coalesce(weight, 0) from wb_py_dict where type = '\(CandidateType.user.rawValue)' order by id asc"
+            : "select query, text, 0 from wb_py_dict where type = '\(CandidateType.user.rawValue)' order by id asc"
+        var stmt: OpaquePointer?
+        var candidates: [(String, String, Int)] = []
+        if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let code = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+                let text = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+                candidates.append((code, text, Int(sqlite3_column_int(stmt, 2))))
+            }
+        }
+        sqlite3_finalize(stmt)
+        return candidates
     }
 }
