@@ -1040,6 +1040,13 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                 if let result = SentenceEngine.shared.candidates(
                     session: _sentenceSession, raw: _originalString) {
                     _sentenceActive = true
+                    // 用户自定义短语与整句候选按文字归并（text-keyed consolidation）：
+                    // 同一文字只占一个槽位——整句已产出的（如 `edfrw` 的「逸码」）
+                    // 复用整句候选（保留分段码与语境得分）并提到首组，不新增重复槽位；
+                    // 整句没覆盖的纯用户短语（如 `date {yyyy}{MM}{dd}`）才新开槽位。
+                    let userMatches = DictManager.shared.getUserCandidates(matching: _originalString)
+                    var userTexts = Set<String>()
+                    for user in userMatches { userTexts.insert(user.text) }
                     // 「候选词数量」照常生效：整句候选按页切，-/= 翻页，
                     // Tab/方向键在页内循环高亮
                     let all = result.candidates
@@ -1049,18 +1056,27 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                     if curPage > pageCount { curPage = pageCount }
                     let start = (curPage - 1) * pageSize
                     let pageItems = Array(all[start..<min(start + pageSize, all.count)])
-                    var list = pageItems.map { completed in
+                    let pageCandidates = pageItems.map { completed in
                         Candidate(code: completed.segmented.isEmpty ? _originalString : completed.segmented,
                                   text: completed.text,
                                   type: .sentence)
                     }
-                    // 编码完整命中用户自定义短语（如 `date {yyyy}{MM}{dd}`）时置顶，
-                    // 并挂起自动上屏——等用户显式选择，不被整句抢先提交
-                    let userMatches = DictManager.shared.getUserCandidates(matching: _originalString)
-                    if !userMatches.isEmpty {
+                    var list: [Candidate]
+                    if userMatches.isEmpty {
+                        list = pageCandidates
+                    } else {
+                        // 首组按用户词库存放顺序；命中整句的复用整句候选对象
+                        var byText: [String: Candidate] = [:]
+                        for c in pageCandidates { byText[c.text] = c }
+                        var frontGroup: [Candidate] = []
                         if curPage == 1 {
-                            list.insert(contentsOf: userMatches, at: 0)
+                            for user in userMatches {
+                                frontGroup.append(byText[user.text] ?? user)
+                            }
                         }
+                        // 其余页同样剔除同名槽位（槽位全局唯一，已摆在首页首组）
+                        let rest = pageCandidates.filter { !userTexts.contains($0.text) }
+                        list = frontGroup + rest
                         // 清证据防止紧随其后的键抢先提前上屏（短语已在榜首，等显式选择）
                         SentenceEngine.shared.evidenceInvalidated(_sentenceSession)
                     }
