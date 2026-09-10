@@ -124,3 +124,5 @@ iOSInjectionProject/
 
 # End of https://www.gitignore.io/api/swift,macos
 .plan/
+tools/ngram/fast_train
+tools/ngram/corpus/
