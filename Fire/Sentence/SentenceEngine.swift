@@ -38,6 +38,27 @@ final class SentenceSession {
     // 空码上屏
     var emptyCodePending: SentenceEmptyPending?
 
+    /// 最近自动上屏的文字片段（旧→新，最多存 2 段 = 留存数上限）。
+    /// 自动上屏后作为 n-gram 左上下文喂回解码器，让后续编码接着语境组句
+    /// （「回」已上屏，再打 gbmqbk 才能组出承前的句子）。
+    /// 不受 resetAll 影响：上屏的文字已进文档，clean/换码都不该丢这个语境。
+    var contextSegments: [String] = []
+
+    /// 按「N-gram留存信息数」（0/1/2）实时裁剪的左上下文文本
+    var contextText: String {
+        let depth = min(2, max(0, Defaults[.sentenceContextDepth]))
+        guard depth > 0, !contextSegments.isEmpty else { return "" }
+        return contextSegments.suffix(depth).joined()
+    }
+
+    func recordContext(_ text: String) {
+        guard !text.isEmpty else { return }
+        contextSegments.append(text)
+        if contextSegments.count > 2 {
+            contextSegments.removeFirst(contextSegments.count - 2)
+        }
+    }
+
     /// 本次会话累计敲入的键数（前 4 键豁免用，跨自动上屏不清零）
     var sessionKeyCount: Int = 0
     /// 会话绑定的词表代数；换词库后由 controller 重置会话
@@ -126,7 +147,8 @@ final class SentenceEngine {
     func candidates(session: SentenceSession, raw: String) -> SentenceDecodeResult? {
         guard available else { return nil }
         guard raw.first != "`" else { return nil }
-        let result = session.decoder.decode(raw, includeEarlyCommit: false)
+        let result = session.decoder.decode(raw, includeEarlyCommit: false,
+                                             context: session.contextText)
         if result.candidates.isEmpty { return nil }
         return result
     }
@@ -201,7 +223,8 @@ final class SentenceEngine {
             return nil
         }
 
-        let result = session.decoder.decode(raw, includeEarlyCommit: true)
+        let result = session.decoder.decode(raw, includeEarlyCommit: true,
+                                             context: session.contextText)
         let evidence = result.evidence
         if evidence.confidenceTruncated {
             session.resetEvidence()
@@ -294,6 +317,7 @@ final class SentenceEngine {
         let commit = tracker.text
         session.committedText = committedTextByAppending(session.committedText, commit)
         session.committedRawLength += tracker.rawLength
+        session.recordContext(commit)
         session.lastAutoCommitRawLength = tracker.rawLength
         session.continuationAfterAutoCommit = false
         session.resetEvidence()
@@ -427,6 +451,7 @@ final class SentenceEngine {
         let retainedRaw = String(raw.dropFirst(pending.baseRawLength))
         session.committedText = committedTextByAppending(session.committedText, commit)
         session.committedRawLength += pending.baseRawLength
+        session.recordContext(commit)
         session.lastAutoCommitRawLength = pending.baseRawLength
         session.trackers = [:]
         session.lastSeenRaw = ""
@@ -442,7 +467,8 @@ final class SentenceEngine {
     /// 多个候选时要求榜首后验占比 ≥ strongShare。
     private func captureEmptyCodeCandidate(session: SentenceSession,
                                             fullBefore: String) -> SentenceEmptyPending? {
-        let decoded = session.decoder.decode(fullBefore, includeEarlyCommit: false)
+        let decoded = session.decoder.decode(fullBefore, includeEarlyCommit: false,
+                                              context: session.contextText)
         guard !decoded.candidates.isEmpty else { return nil }
         let visibleTop = decoded.candidates[0]
         // 虎整句：编码里带显式选重符时全 rank 都有资格；否则只认隐式首选

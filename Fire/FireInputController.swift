@@ -1163,6 +1163,10 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                 Fire.shared.recentCommittedTexts.removeFirst()
             }
         }
+        // 整句模式：手动选词上屏的文字也计入 n-gram 留存语境
+        if Defaults[.enableSentenceMode], candidate.type != .placeholder {
+            _sentenceSession.recordContext(candidate.text)
+        }
         insertText(candidate.text)
         let appBundleId = client()?.bundleIdentifier() ?? ""
         let notification = Notification(
@@ -1351,6 +1355,12 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         client()?.insertText(NSAttributedString(string: ""), replacementRange: range)
         _lastCommittedText = ""
         _lastCommittedRange = nil
+        // 撤销的是整句上屏的文字时，同步弹出对应的 n-gram 留存段
+        if Defaults[.enableSentenceMode],
+           let last = _sentenceSession.contextSegments.last,
+           last == previousText {
+            _sentenceSession.contextSegments.removeLast()
+        }
         return true
     }
 }

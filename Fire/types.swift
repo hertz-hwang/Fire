@@ -117,6 +117,9 @@ extension Defaults.Keys {
     static let enableSentenceAllowDuplicateSingle = Key<Bool>("enableSentenceAllowDuplicateSingle", default: true)
     // 整句 n-gram 模型覆盖路径（空表示用内置 Resources 里的模型）
     static let sentenceModelPath = Key<String>("sentenceModelPath", default: "")
+    // N-gram留存信息数（0/1/2）：自动上屏后保留最近 N 次上屏文本的文字信息，
+    // 作为后续组句的左上下文（否则「回」已上屏，接着打 gbmqbk 组不出承前的句子）
+    static let sentenceContextDepth = Key<Int>("sentenceContextDepth", default: 1)
     static let enablePunctuationCandidateSelect = Key<Bool>(
         "enablePunctuationCandidateSelect",
         default: false

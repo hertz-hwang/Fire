@@ -30,6 +30,7 @@ struct GeneralPane: View {
     @Default(.enableSentenceMode) private var enableSentenceMode
     @Default(.enableSentenceAutoCommit) private var enableSentenceAutoCommit
     @Default(.enableSentenceAllowDuplicateSingle) private var enableSentenceAllowDuplicateSingle
+    @Default(.sentenceContextDepth) private var sentenceContextDepth
     @Default(.enableCharDivTip) private var enableCharDivTip
     @Default(.toggleInputModeKey) private var toggleInputModeKey
     @Default(.disableEnMode) private var disableEnMode
@@ -89,6 +90,25 @@ struct GeneralPane: View {
                                 HStack {
                                     Toggle("单字重码组句", isOn: $enableSentenceAllowDuplicateSingle)
                                     Spacer(minLength: 50)
+                                }
+                                HStack {
+                                    Text("N-gram留存信息数")
+                                    Slider(value: Binding(
+                                        get: { Double(sentenceContextDepth) },
+                                        set: { sentenceContextDepth = Int($0) }
+                                    ), in: 0...2, step: 1) {
+                                        EmptyView()
+                                    }
+                                    Text("\(sentenceContextDepth)")
+                                        .frame(width: 20, alignment: .trailing)
+                                    Spacer(minLength: 50)
+                                }
+                                HStack {
+                                    Text("0：不留存；1：保留前一次上屏文本的信息；2：保留前两次上屏文本的信息，用于后续组句的语境")
+                                        .font(Font.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Spacer(minLength: 0)
                                 }
                             }
                             if commitMode == .emptyCodeDirect && !enableSentenceMode {

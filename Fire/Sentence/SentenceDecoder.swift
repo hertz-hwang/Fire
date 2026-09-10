@@ -313,6 +313,8 @@ final class SentenceDecoder {
     /// 增量 lattice 缓存
     private var cachedRaw: [UInt8] = []
     private var cachedBuckets: [SentenceBucket?] = []
+    /// 构建 lattice 时用的左上下文（自动上屏留存文本）；变了必须整体重解码
+    private var cachedContext: String = ""
     /// lattice 构建时的词表代数；换词库后必须整体重解码
     private var cachedLexiconGeneration: Int = -1
     /// 单字单码开关变更也让增量缓存作废（rank 资格变了）
@@ -339,6 +341,7 @@ final class SentenceDecoder {
     func reset() {
         cachedRaw = []
         cachedBuckets = []
+        cachedContext = ""
     }
 
     /// normalize：小写 + 去空白，保留选重符 a-z;'0-9（虎整句 alphabet 同源）
@@ -702,7 +705,11 @@ final class SentenceDecoder {
 
     /// 整句解码。append：从 `oldN + 1 - maxConsume` 起扩展并禁止产生
     /// consumedEnd ≤ oldN 的新边；delete：直接砍尾部桶。
-    func decode(_ rawCode: String, includeEarlyCommit: Bool = false) -> SentenceDecodeResult {
+    /// context：自动上屏留存的左上下文文字（「N-gram留存信息数」）。
+    /// 只喂给 n-gram 与 supplement 做历史（prev2/prev1 seed + AC 状态推进），
+    /// 不进候选文字、不计 score/mass——左上下文对同一输入下所有候选同等生效。
+    func decode(_ rawCode: String, includeEarlyCommit: Bool = false,
+                context: String = "") -> SentenceDecodeResult {
         let allowDuplicate = Defaults[.enableSentenceAllowDuplicateSingle]
         guard let raw = SentenceDecoder.normalize(rawCode), !raw.isEmpty,
               SentenceDecoder.hasLetter(raw),
@@ -720,6 +727,12 @@ final class SentenceDecoder {
             cachedLexiconGeneration = lexicon.generation
             cachedAllowDuplicate = allowDuplicate
             supplement.refresh()
+        }
+        // 左上下文变了（新上屏/留存数调整）：旧 lattice 的历史全部错位，整体重解码
+        if context != cachedContext {
+            cachedRaw = []
+            cachedBuckets = []
+            cachedContext = context
         }
 
         let signpostID = OSSignpostID(log: .sentence)
@@ -757,7 +770,8 @@ final class SentenceDecoder {
         }
 
         if buckets == nil {
-            buckets = buildFreshBuckets(raw, allowDuplicateSingle: allowDuplicate)
+            buckets = buildFreshBuckets(raw, allowDuplicateSingle: allowDuplicate,
+                                        context: context)
         }
 
         var finalBuckets = buckets!
@@ -773,7 +787,7 @@ final class SentenceDecoder {
         // 长句偶尔跳字且极难复现，这是唯一能兜住的手段。
         if length > 4 {
             let full = decodeFull(raw, includeEarlyCommit: includeEarlyCommit,
-                                  allowDuplicateSingle: allowDuplicate)
+                                  allowDuplicateSingle: allowDuplicate, context: context)
             let incremental = result.candidates.map {
                 "\($0.text)|\($0.segmented)|\($0.score)|\($0.confidenceScore)"
             }
@@ -787,13 +801,30 @@ final class SentenceDecoder {
         return result
     }
 
-    private func buildFreshBuckets(_ raw: [UInt8], allowDuplicateSingle: Bool) -> [SentenceBucket?] {
+    private func buildFreshBuckets(_ raw: [UInt8], allowDuplicateSingle: Bool,
+                                   context: String) -> [SentenceBucket?] {
         let length = raw.count
         var fresh: [SentenceBucket?] = Array(repeating: nil, count: length + 1)
+        // 左上下文 seed：prev2/prev1 = 留存文本末尾两字（不足补 BOS），
+        // supplement 匹配状态沿留存文本推进——跨上屏边界的新词也能接住。
+        // 留存文字不产出候选、不计分，只做语言模型历史。
+        var prev2 = NgramModel.bos
+        var prev1 = NgramModel.bos
+        var supState = 0
+        if supplement.hasEntries {
+            for ch in context {
+                supState = supplement.advance(state: supState, ch).state
+            }
+        }
+        for scalar in context.unicodeScalars.suffix(2) {
+            prev2 = prev1
+            prev1 = scalar.value
+        }
         let root = SentenceBucket()
         root.append(SentenceState(score: 0, massScore: 0, text: "",
-                                  prev2: NgramModel.bos, prev1: NgramModel.bos,
-                                  maxRank: 1, previous: nil, rawLength: 0, edgeCount: 0))
+                                  prev2: prev2, prev1: prev1,
+                                  maxRank: 1, previous: nil, rawLength: 0, edgeCount: 0,
+                                  supplementState: supState))
         fresh[0] = root
         for index in 1...length {
             fresh[index] = SentenceBucket()
@@ -805,8 +836,10 @@ final class SentenceDecoder {
 
     /// 全量解码（DEBUG 一致性校验用）
     fileprivate func decodeFull(_ raw: [UInt8], includeEarlyCommit: Bool,
-                               allowDuplicateSingle: Bool) -> SentenceDecodeResult {
-        var fresh = buildFreshBuckets(raw, allowDuplicateSingle: allowDuplicateSingle)
+                               allowDuplicateSingle: Bool,
+                               context: String) -> SentenceDecodeResult {
+        var fresh = buildFreshBuckets(raw, allowDuplicateSingle: allowDuplicateSingle,
+                                       context: context)
         return emit(raw, &fresh, length: raw.count, includeEarlyCommit: includeEarlyCommit,
                     allowDuplicateSingle: allowDuplicateSingle)
     }
