@@ -83,6 +83,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // 拼音方案锁定项归一（覆盖老版本升级残留的自由配置）
         enforcePinyinInputModeDefaults()
+        // 老版本平铺在 Resources 根的码表路径迁移到 Resources/schemas
+        SchemaCatalog.migrateLegacyTablePaths()
+        // 无配套整句码表的方案（五笔86/98 等）：整句强制关闭
+        enforceTableSentenceSupport()
         if !hasDict() {
             NSLog("[Fire] first run，build dict")
             buildDict()

@@ -1,3 +1,7 @@
+#name=虎整句
+#describe=虎整句
+#author=ID;Peace B
+#visible=0
 的	u
 的	ue
 一	f
@@ -71,7 +75,7 @@
 后	xf
 发	sr
 都	q
-都  qo	0
+都	qo
 里	dl
 没	kr
 还	cu
@@ -86,7 +90,7 @@
 作	jw
 多	ll
 行	p
-行  px	0
+行	px
 只	dh
 好	bh
 成	na

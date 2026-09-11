@@ -12,7 +12,6 @@ import Settings
 import Defaults
 
 struct ThesaurusPane: View {
-    @Default(.wbTablePath) private var wbTablePath
     @Default(.pyTablePath) private var pyTablePath
     @Default(.charDivTablePath) private var charDivTablePath
     @Default(.charDivRootFontName) private var charDivRootFontName
@@ -68,25 +67,6 @@ struct ThesaurusPane: View {
                 VStack(alignment: .leading) {
                     GroupBox(label: Text("词库设置")) {
                         VStack(spacing: 6) {
-                            HStack {
-                                Group {
-                                    Text("形码词库: ")
-                                    Text(wbTablePath)
-                                        .lineLimit(1)
-                                        .padding(.horizontal, 6)
-                                        .truncationMode(.middle)
-                                        .font(.system(size: 10))
-                                      .foregroundColor(.white)
-                                        .background(Color(.displayP3, red: 0.5, green: 0.5, blue: 0.5, opacity: 1))
-                                        .cornerRadius(4)
-                                        .onTapGesture {
-                                            if let path = selectFile() {
-                                                Defaults[.wbTablePath] = path
-                                            }
-                                        }
-                                }
-                                Spacer()
-                            }
                             HStack {
                                 Group {
                                     Text("拼音词库: ")

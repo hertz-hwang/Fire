@@ -32,16 +32,15 @@
 		67C9A00F2AB53E83000B5281 /* FireInputController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A0072AB53E83000B5281 /* FireInputController.swift */; };
 		67C9A0102AB53E83000B5281 /* types.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A0082AB53E83000B5281 /* types.swift */; };
 		67C9A0132AB53EB0000B5281 /* build.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A0122AB53EB0000B5281 /* build.swift */; };
+		AA5E000E000000000SCHEM0E /* SchemaCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000D000000000SCHEM0D /* SchemaCatalog.swift */; };
 		B69DA4B49CE03349FE520100 /* CharDivTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8620ABF31D9A811185DDB4F8 /* CharDivTable.swift */; };
 		67C9A0312AB53ED3000B5281 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 67C9A0152AB53ED2000B5281 /* InfoPlist.strings */; };
 		67C9A0322AB53ED3000B5281 /* CandidatesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A0182AB53ED2000B5281 /* CandidatesView.swift */; };
 		67C9A0342AB53ED3000B5281 /* FireMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A01A2AB53ED2000B5281 /* FireMenu.swift */; };
 		67C9A0352AB53ED3000B5281 /* ThemeConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A01C2AB53ED2000B5281 /* ThemeConfig.swift */; };
 		67C9A0362AB53ED3000B5281 /* DictManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A01D2AB53ED2000B5281 /* DictManager.swift */; };
-		67C9A0372AB53ED3000B5281 /* wb_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = 67C9A01F2AB53ED3000B5281 /* wb_table.txt */; };
-		67C9A0382AB53ED3000B5281 /* py_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = 67C9A0202AB53ED3000B5281 /* py_table.txt */; };
 		3E473DAF26FC69B9885764EB /* ll_div.txt in Resources */ = {isa = PBXBuildFile; fileRef = F19CED7AB5B1DBD756937732 /* ll_div.txt */; };
-		67C9A0392AB53ED3000B5281 /* wb_98_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = 67C9A0212AB53ED3000B5281 /* wb_98_table.txt */; };
+		AA5E000A000000000RESRC0A /* schemas in Resources */ = {isa = PBXBuildFile; fileRef = AA5E000B000000000SCHEM0B /* schemas */; };
 		67C9A03A2AB53ED3000B5281 /* FireInputServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A0222AB53ED3000B5281 /* FireInputServer.swift */; };
 		67C9A03C2AB53ED3000B5281 /* StatisticsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A0252AB53ED3000B5281 /* StatisticsPane.swift */; };
 		AABB0001STAT00001 /* StatsViewComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABB0001STATF0001 /* StatsViewComponents.swift */; };
@@ -63,8 +62,6 @@
 		67C9A0582AB5429B000B5281 /* sqlite3.c in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A0562AB5429B000B5281 /* sqlite3.c */; settings = {COMPILER_FLAGS = "-w"; }; };
 		67F0B0D32AFFC282006F835D /* StatusBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67F0B0D22AFFC282006F835D /* StatusBarController.swift */; };
 		910DF3B32F6273D000EDA24D /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 67C9A05A2AB5445E000B5281 /* Security.framework */; };
-		91A475092F62847B0047EEBC /* liuli_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = 91A475082F62847B0047EEBC /* liuli_table.txt */; };
-		91A4750C2F62847B0047EEBC /* xiaoxiang_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = 91A4750D2F62847B0047EEBC /* xiaoxiang_table.txt */; };
 		AA5E0001000000000SENT001 /* NgramModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0001000000000SENT101 /* NgramModel.swift */; };
 		AA5E0002000000000SENT002 /* SentenceLexicon.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0002000000000SENT102 /* SentenceLexicon.swift */; };
 		AA5E0003000000000SENT003 /* SentenceDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0003000000000SENT103 /* SentenceDecoder.swift */; };
@@ -72,9 +69,6 @@
 		AA5E0008000000000SENT008 /* SentenceSupplement.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0008000000000SENT108 /* SentenceSupplement.swift */; };
 		AA5E0005000000000SENT005 /* SentenceTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0005000000000SENT105 /* SentenceTypes.swift */; };
 		AA5E0006000000000SENT006 /* sentence-ngram-mobile.bin in Resources */ = {isa = PBXBuildFile; fileRef = AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */; };
-		AA5E0007000000000SENT007 /* sentence-codes-liuli.txt in Resources */ = {isa = PBXBuildFile; fileRef = AA5E0007000000000SENT107 /* sentence-codes-liuli.txt */; };
-		AA5E0009000000000SENT009 /* sentence-codes-tiger.txt in Resources */ = {isa = PBXBuildFile; fileRef = AA5E0009000000000SENT109 /* sentence-codes-tiger.txt */; };
-		AA5E000A000000000SENT010 /* tiger_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = AA5E000A000000000SENT110 /* tiger_table.txt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -126,10 +120,7 @@
 		67C9A01A2AB53ED2000B5281 /* FireMenu.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FireMenu.swift; sourceTree = "<group>"; };
 		67C9A01C2AB53ED2000B5281 /* ThemeConfig.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ThemeConfig.swift; sourceTree = "<group>"; };
 		67C9A01D2AB53ED2000B5281 /* DictManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = DictManager.swift; sourceTree = "<group>"; };
-		67C9A01F2AB53ED3000B5281 /* wb_table.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = wb_table.txt; sourceTree = "<group>"; };
-		67C9A0202AB53ED3000B5281 /* py_table.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = py_table.txt; sourceTree = "<group>"; };
 		F19CED7AB5B1DBD756937732 /* ll_div.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = ll_div.txt; sourceTree = "<group>"; };
-		67C9A0212AB53ED3000B5281 /* wb_98_table.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = wb_98_table.txt; sourceTree = "<group>"; };
 		67C9A0222AB53ED3000B5281 /* FireInputServer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FireInputServer.swift; sourceTree = "<group>"; };
 		67C9A0232AB53ED3000B5281 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		67C9A0252AB53ED3000B5281 /* StatisticsPane.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = StatisticsPane.swift; sourceTree = "<group>"; };
@@ -137,6 +128,7 @@
 		67C9A0262AB53ED3000B5281 /* FirePreferencesController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FirePreferencesController.swift; sourceTree = "<group>"; };
 		67C9A0272AB53ED3000B5281 /* UserDictPane.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = UserDictPane.swift; sourceTree = "<group>"; };
 		67C9A0282AB53ED3000B5281 /* GeneralPane.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GeneralPane.swift; sourceTree = "<group>"; };
+		AA5E000D000000000SCHEM0D /* SchemaCatalog.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SchemaCatalog.swift; sourceTree = "<group>"; };
 		67C9A0292AB53ED3000B5281 /* ApplicationPane.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ApplicationPane.swift; sourceTree = "<group>"; };
 		67C9A02A2AB53ED3000B5281 /* ThemePane.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ThemePane.swift; sourceTree = "<group>"; };
 		67C9A02B2AB53ED3000B5281 /* ThesaurusPane.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ThesaurusPane.swift; sourceTree = "<group>"; };
@@ -148,8 +140,6 @@
 		67C9A0572AB5429B000B5281 /* sqlite3.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = sqlite3.h; sourceTree = "<group>"; };
 		67C9A05A2AB5445E000B5281 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		67F0B0D22AFFC282006F835D /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
-		91A475082F62847B0047EEBC /* liuli_table.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = liuli_table.txt; sourceTree = "<group>"; };
-		91A4750D2F62847B0047EEBC /* xiaoxiang_table.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = xiaoxiang_table.txt; sourceTree = "<group>"; };
 		AA5E0001000000000SENT101 /* NgramModel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NgramModel.swift; sourceTree = "<group>"; };
 		AA5E0002000000000SENT102 /* SentenceLexicon.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceLexicon.swift; sourceTree = "<group>"; };
 		AA5E0003000000000SENT103 /* SentenceDecoder.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceDecoder.swift; sourceTree = "<group>"; };
@@ -157,9 +147,7 @@
 		AA5E0008000000000SENT108 /* SentenceSupplement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentenceSupplement.swift; sourceTree = "<group>"; };
 		AA5E0005000000000SENT105 /* SentenceTypes.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceTypes.swift; sourceTree = "<group>"; };
 		AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */ = {isa = PBXFileReference; lastKnownFileType = file; path = "sentence-ngram-mobile.bin"; sourceTree = "<group>"; };
-		AA5E0007000000000SENT107 /* sentence-codes-liuli.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "sentence-codes-liuli.txt"; sourceTree = "<group>"; };
-		AA5E0009000000000SENT109 /* sentence-codes-tiger.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "sentence-codes-tiger.txt"; sourceTree = "<group>"; };
-		AA5E000A000000000SENT110 /* tiger_table.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = tiger_table.txt; sourceTree = "<group>"; };
+		AA5E000B000000000SCHEM0B /* schemas */ = {isa = PBXFileReference; lastKnownFileType = folder; path = schemas; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -288,6 +276,7 @@
 			isa = PBXGroup;
 			children = (
 				67C9A0122AB53EB0000B5281 /* build.swift */,
+				AA5E000D000000000SCHEM0D /* SchemaCatalog.swift */,
 				8620ABF31D9A811185DDB4F8 /* CharDivTable.swift */,
 			);
 			path = Table;
@@ -312,16 +301,9 @@
 		67C9A01E2AB53ED3000B5281 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				91A475082F62847B0047EEBC /* liuli_table.txt */,
-				91A4750D2F62847B0047EEBC /* xiaoxiang_table.txt */,
-				67C9A01F2AB53ED3000B5281 /* wb_table.txt */,
-				67C9A0202AB53ED3000B5281 /* py_table.txt */,
+				AA5E000B000000000SCHEM0B /* schemas */,
 				F19CED7AB5B1DBD756937732 /* ll_div.txt */,
-				67C9A0212AB53ED3000B5281 /* wb_98_table.txt */,
 				AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */,
-				AA5E0007000000000SENT107 /* sentence-codes-liuli.txt */,
-				AA5E0009000000000SENT109 /* sentence-codes-tiger.txt */,
-				AA5E000A000000000SENT110 /* tiger_table.txt */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -477,18 +459,11 @@
 			files = (
 				67AA47FF2AB733860073AC86 /* Assets.xcassets in Resources */,
 				67C9A0312AB53ED3000B5281 /* InfoPlist.strings in Resources */,
-				67C9A0382AB53ED3000B5281 /* py_table.txt in Resources */,
+				AA5E000A000000000RESRC0A /* schemas in Resources */,
 				3E473DAF26FC69B9885764EB /* ll_div.txt in Resources */,
-				67C9A0372AB53ED3000B5281 /* wb_table.txt in Resources */,
 				4572854E2BD0EAF90048D67E /* Credits.html in Resources */,
-				91A475092F62847B0047EEBC /* liuli_table.txt in Resources */,
-				91A4750C2F62847B0047EEBC /* xiaoxiang_table.txt in Resources */,
 				AA5E0006000000000SENT006 /* sentence-ngram-mobile.bin in Resources */,
-				AA5E0007000000000SENT007 /* sentence-codes-liuli.txt in Resources */,
-				AA5E0009000000000SENT009 /* sentence-codes-tiger.txt in Resources */,
-				AA5E000A000000000SENT010 /* tiger_table.txt in Resources */,
 				67C9A00D2AB53E83000B5281 /* fire.pdf in Resources */,
-				67C9A0392AB53ED3000B5281 /* wb_98_table.txt in Resources */,
 				67C9A0092AB53E83000B5281 /* MainMenu.xib in Resources */,
 				67C9A0452AB53ED3000B5281 /* InfoPlist.strings in Resources */,
 			);
@@ -534,6 +509,7 @@
 				67F0B0D32AFFC282006F835D /* StatusBarController.swift in Sources */,
 				67C9A0402AB53ED3000B5281 /* ApplicationPane.swift in Sources */,
 				67C9A0132AB53EB0000B5281 /* build.swift in Sources */,
+				AA5E000E000000000SCHEM0E /* SchemaCatalog.swift in Sources */,
 				B69DA4B49CE03349FE520100 /* CharDivTable.swift in Sources */,
 				67C9A0422AB53ED3000B5281 /* ThesaurusPane.swift in Sources */,
 				67C9A0002AB53E62000B5281 /* ModifierKeyUpChecker.swift in Sources */,

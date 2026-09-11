@@ -9,6 +9,8 @@
 import SwiftUI
 import Settings
 import Defaults
+import AppKit
+import UniformTypeIdentifiers
 
 struct GeneralPane: View {
 
@@ -37,6 +39,83 @@ struct GeneralPane: View {
     @Default(.disableTempEnMode) private var disableTempEnMode
     @Default(.showInputModeStatus) private var showInputModeStatus
     @Default(.enableWhitespaceBetweenZhEn) private var enableWhitespaceBetweenZhEn
+    @Default(.wbTablePath) private var wbTablePath
+
+    /// 「自定义码表」哨兵值：选中它即弹文件选择面板
+    private let customTableTag = ""
+
+    /// 当前选中值：#visible=1 的内置码表用其路径；
+    /// #visible=0 的内置码表（全拼、整句方案码表，由编码方案/整句
+    /// 开关自动支持）与本地自定义路径一律落到「自定义码表」
+    private var currentTableSelection: String {
+        SchemaCatalog.isSelectableBuiltin(path: wbTablePath) ? wbTablePath : customTableTag
+    }
+
+    private var builtinTables: [SchemaTableInfo] { SchemaCatalog.builtinTables() }
+
+    private func selectFile() -> String? {
+        let openPanel = NSOpenPanel()
+        let schemasDir = SchemaCatalog.schemasDirectory
+        openPanel.directoryURL = FileManager.default.fileExists(atPath: schemasDir)
+            ? URL(fileURLWithPath: schemasDir)
+            : Bundle.main.resourceURL
+        openPanel.prompt = "选择码表文件"
+        openPanel.allowsMultipleSelection = false
+        openPanel.canChooseDirectories = false
+        openPanel.canCreateDirectories = false
+        openPanel.canChooseFiles = true
+        var types: [UTType] = []
+        for ext in SchemaCatalog.supportedExtensions {
+            if let type = UTType(filenameExtension: ext) { types.append(type) }
+        }
+        openPanel.allowedContentTypes = types
+        let result = openPanel.runModal()
+        if result == NSApplication.ModalResponse.OK {
+            return openPanel.url!.path
+        }
+        return nil
+    }
+
+    /// 码表下拉选中值：内置表用其路径，其余一律落到「自定义码表」
+    private var tableSelectionBinding: Binding<String> {
+        Binding(
+            get: { currentTableSelection },
+            set: { newValue in
+                if newValue == customTableTag {
+                    // 行为同旧版点击「形码词库」：弹面板选本地码表；取消则保持原选择
+                    guard let path = selectFile() else { return }
+                    applyTableSelection(path)
+                } else {
+                    applyTableSelection(newValue)
+                }
+            }
+        )
+    }
+
+    /// 当前码表能否走整句（仅虎/琉璃有配套整句码表）。
+    /// 仅码表方案参与判定：五笔86/98 等切过去后「整句」不可勾选。
+    private var sentenceAvailableForTable: Bool {
+        code != .wubi || SchemaCatalog.supportsSentence(selectedTablePath: wbTablePath)
+    }
+
+    /// 切换码表：持久化路径并后台重建索引（与高级面板「建立索引」同义）。
+    /// wbTablePath 变化会由 SentenceEngine 监听自动打脏整句词图。
+    private func applyTableSelection(_ path: String) {
+        let changed = path != wbTablePath
+        wbTablePath = path
+        // 无配套整句码表的方案（五笔86/98 等）：整句强制关闭
+        if code == .wubi, !SchemaCatalog.supportsSentence(selectedTablePath: path), enableSentenceMode {
+            enableSentenceMode = false
+        }
+        guard changed else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            DictManager.shared.close()
+            buildDict()
+            DictManager.shared.reinit()
+            // 整句词图跟随词库重建
+            SentenceLexicon.shared.markDirty()
+        }
+    }
 
     private func chineseNumber(_ n: Int) -> String {
         let map: [Int: String] = [3: "三", 4: "四", 5: "五", 6: "六", 7: "七", 8: "八", 9: "九", 10: "十"]
@@ -73,12 +152,35 @@ struct GeneralPane: View {
                                 .onChange(of: code) { _ in
                                     enforcePinyinDefaults()
                                 }
-                                Spacer(minLength: 50)
+                                // 仅码表方案提供内置码表选择（选项来自 Resources/schemas）
+                                if code == .wubi {
+                                    Picker("码表", selection: tableSelectionBinding) {
+                                        ForEach(builtinTables) { info in
+                                            Text(info.name)
+                                                .help(info.tooltip)
+                                                .tag(info.path)
+                                        }
+                                        Text("自定义码表").tag(customTableTag)
+                                    }
+                                    .frame(width: 170)
+                                }
+                                Spacer(minLength: 20)
+                            }
+                            if code == .wubi, !SchemaCatalog.isSelectableBuiltin(path: wbTablePath), !wbTablePath.isEmpty {
+                                HStack {
+                                    Text(wbTablePath)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                }
                             }
                             HStack {
                                 Toggle("整句", isOn: $enableSentenceMode)
-                                    // 拼音方案强制整句：勾选锁定不可改
-                                    .disabled(isPinyin)
+                                    // 拼音方案强制整句：勾选锁定不可改；
+                                    // 所选码表无配套整句码表（五笔86/98 等）：不可勾选
+                                    .disabled(isPinyin || !sentenceAvailableForTable)
                                 Spacer(minLength: 50)
                             }
                             HStack {

@@ -190,11 +190,11 @@ extension Defaults.Keys {
 
     static let wbTablePath = Key<String>(
         "wbTableURL",
-        default: Bundle.main.resourceURL?.appendingPathComponent("tiger_table.txt").path
+        default: Bundle.main.resourceURL?.appendingPathComponent("schemas/tiger_table.txt").path
             ?? "")
     static let pyTablePath = Key<String>(
         "pyTableURL",
-        default: Bundle.main.resourceURL?.appendingPathComponent("py_table.txt").path
+        default: Bundle.main.resourceURL?.appendingPathComponent("schemas/py_table.txt").path
             ?? "")
     // 拆分表，用于候选词悬浮提示拆分信息
     static let charDivTablePath = Key<String>(
@@ -262,6 +262,17 @@ func enforcePinyinInputModeDefaults() {
     if Defaults[.wubiCodeTip] { Defaults[.wubiCodeTip] = false }
     if Defaults[.zKeyQuery] { Defaults[.zKeyQuery] = false }
     if Defaults[.zKeyRepeat] { Defaults[.zKeyRepeat] = false }
+}
+
+/// 码表方案的整句资格归一：所选码表无配套整句码表（五笔86/98 等）时
+/// 强制关闭整句——面板上该开关是灰的，运行态必须与之一致，
+/// 否则老配置残留会把五笔按键码送进虎整句边表，整句全打不中。
+func enforceTableSentenceSupport() {
+    guard Defaults[.codeMode] == .wubi else { return }
+    if Defaults[.enableSentenceMode],
+       !SchemaCatalog.supportsSentence(selectedTablePath: Defaults[.wbTablePath]) {
+        Defaults[.enableSentenceMode] = false
+    }
 }
 
 enum CodeInWindowMode: Int, Decodable, Encodable, Defaults.Serializable {

@@ -24,26 +24,38 @@ string txtPath;
 
 sqlite3 *db;
 
+// 按统一码表格式「候选\t编码」拆分一行：
+// 只认制表符分隔、且编码侧为纯小写字母（可含数字/撇号等 ASCII 可见字符）；
+// # 注释与不含制表符的行返回空。
 vector<string> split(const string& s) {
     vector<std::string> sv;
-    int i = 0;
-    std::string ss;
-
-    while (s[i] != '\0') {
-        if (s[i] != ' ' && s[i] != '\t' && s[i] != '\r' && s[i] != '\n') {
-            // Append the char to the temp string.
-            ss += s[i];
-        } else if (ss.size() > 0) {
-            sv.emplace_back(ss);
-            ss.clear();
-        }
-        i++;
+    size_t tab = s.find('\t');
+    if (tab == string::npos) {
+        return sv;
     }
-    
-  if (ss.size() > 0) {
-    sv.emplace_back(ss);
-  }
-
+    string text = s.substr(0, tab);
+    string code = s.substr(tab + 1);
+    // 去掉行尾残留
+    while (!code.empty() && (code.back() == '\r' || code.back() == '\n' || code.back() == ' ')) {
+        code.pop_back();
+    }
+    while (!text.empty() && (text.back() == '\r' || text.back() == '\n')) {
+        text.pop_back();
+    }
+    if (text.empty() || code.empty()) {
+        return sv;
+    }
+    if (text[0] == '#') {
+        return sv;
+    }
+    for (unsigned char c : code) {
+        if (!isalnum(c) && c != '\'' && c != '-' && c != '`') {
+            return sv;
+        }
+    }
+    // 与旧版语义一致：columns[0]=编码，columns[1]=候选
+    sv.emplace_back(code);
+    sv.emplace_back(text);
     return sv;
 }
 
@@ -215,7 +227,12 @@ int main(int argc, const char * argv[]) {
     
     string line;
     while(getline(infile, line)) {
-        dict.emplace_back(split(line));
+        auto columns = split(line);
+        // 注释行（#name/#describe/#author 等）、空行与不合格式的行跳过
+        if (columns.empty()) {
+            continue;
+        }
+        dict.emplace_back(columns);
     }
     
     vector<string> rowstrs;

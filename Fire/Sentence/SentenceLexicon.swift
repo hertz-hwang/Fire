@@ -3,12 +3,13 @@
 //  Fire
 //
 //  整句词图边表（移植虎整句 build_lexicon_index 的精简版）。
-//  内置方案：形码模式整句码表按所选形码词库自动匹配（Resources 下
-//  sentence-codes-tiger.txt / sentence-codes-liuli.txt，明文
-//  `文字 码`，文件序 = rank）；Application Support 同名文件可覆盖。
-//  拼音模式直接使用所选拼音码表（py_table.txt，明文 `码 词1 词2 …`，
-//  行内词序/文件序 = rank，码长截到 pinyinMaxCodeLength）。
+//  内置方案：形码模式整句码表按所选码表自动匹配（Resources/schemas 下
+//  sentence-codes-tiger.txt / sentence-codes-liuli.txt）；
+//  拼音模式直接使用所选拼音码表（schemas/py_table.txt）。
 //  与虎整句一致：不使用用户词覆盖层，rank 完全由码表文件序决定。
+//
+//  全部方案码表统一为「候选\t编码」格式（前三行 # 元数据注释）；
+//  词图解析只支持这一种格式。
 //
 
 import Foundation
@@ -148,10 +149,12 @@ final class SentenceLexicon {
     static let defaultCodesFileName = "sentence-codes-tiger.txt"
     /// 拼音模式整句码表：直接用所选拼音码表（py_table.txt）
     static let pinyinCodesFileName = "py_table.txt"
+    /// 内置码表目录（Resources/schemas）
+    private var schemasDir: String { SchemaCatalog.schemasDirectory }
 
-    /// 整句码表文件名：必须与所选形码词库同一编码方案。虎码 的=u，
+    /// 整句码表文件名：必须与所选码表同一编码方案。虎码 的=u，
     /// 琉璃/小叮当码 的=d——错配时整句边表打不中任何按键码，表现为
-    /// 设置换词库后整句全部失效。按词库文件名标记 → 内容嗅探 依次判定。
+    /// 设置换码表后整句全部失效。按词库文件名标记 → 内容嗅探 依次判定。
     static func resolveCodesFileName() -> String {
         let wbPath = Defaults[.wbTablePath]
         let name = (wbPath as NSString).lastPathComponent.lowercased()
@@ -160,7 +163,7 @@ final class SentenceLexicon {
         if name.contains("liuli") || name.contains("琉璃") || name.contains("小叮当") {
             return "sentence-codes-liuli.txt"
         }
-        // 2. 内容嗅探：高频标记单字在各方案码空间里的编码（采样词库头部）
+        // 2. 内容嗅探：高频标记单字在各方案码空间里的编码（采样码表头部）
         //    琉璃空间 {的:d,是:j,不:k,了:l,我:w} 虎码空间 {的:u,是:o,不:c,了:r,我:t}
         let marks: [(ch: Character, liuli: String, tiger: String)] = [
             ("的", "d", "u"), ("是", "j", "o"), ("不", "k", "c"),
@@ -169,11 +172,13 @@ final class SentenceLexicon {
         var hits = ["liuli": 0, "tiger": 0]
         if let text = try? String(contentsOfFile: wbPath, encoding: .utf8) {
             outer: for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-                let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
-                guard parts.count >= 2 else { continue }
-                let code = String(parts[0])
-                let words = parts.dropFirst().map(String.init)
-                for m in marks where words.contains(String(m.ch)) {
+                // 统一格式：`候选\t编码`
+                let parts = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
+                guard parts.count == 2 else { continue }
+                let entryText = parts[0]
+                let code = parts[1].trimmingCharacters(in: .whitespaces)
+                if entryText.isEmpty { continue }
+                for m in marks where entryText == String(m.ch) {
                     if code == m.liuli { hits["liuli", default: 0] += 1 }
                     if code == m.tiger { hits["tiger", default: 0] += 1 }
                     if (hits["liuli"] ?? 0) >= 2 || (hits["tiger"] ?? 0) >= 2 { break outer }
@@ -191,18 +196,14 @@ final class SentenceLexicon {
         var paths: [String] = []
         if mode == .pinyin {
             // 拼音模式：整句词图直接用所选拼音码表（py_table.txt）；
-            // 用户自定义路径失效时回落 Resources 内置表
+            // 用户自定义路径失效时回落 Resources/schemas 内置表
             let pyPath = Defaults[.pyTablePath]
             if !pyPath.isEmpty { paths.append(pyPath) }
-            if let resourceURL = Bundle.main.resourceURL {
-                paths.append(resourceURL.appendingPathComponent(Self.pinyinCodesFileName).path)
-            }
+            paths.append(schemasDir.appending("/" + Self.pinyinCodesFileName))
             return paths
         }
         let fileName = Self.resolveCodesFileName()
-        if let resourceURL = Bundle.main.resourceURL {
-            paths.append(resourceURL.appendingPathComponent(fileName).path)
-        }
+        paths.append(schemasDir.appending("/" + fileName))
         if let supportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             paths.append(supportDir
                 .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Fire")
@@ -211,9 +212,9 @@ final class SentenceLexicon {
         return paths
     }
 
-    /// 解析整句码表。形码表：每行 `文字 码`（文字在前！）；
-    /// 拼音表（py_table.txt）：每行 `码 词1 词2 …`（码在前，同码词序 = rank）。
-    /// 文件序 = rank。整句编码只用这张表（与虎整句 schema 的"运行时明文码表、无用户覆盖"一致）。
+    /// 解析整句码表。全部方案码表统一为「候选\t编码」
+    /// （前三行 # 元数据注释；文件序 = rank）。
+    /// 整句编码只用这张表（与虎整句 schema 的"运行时明文码表、无用户覆盖"一致）。
     private func build(mode: CodeMode) -> Snapshot? {
         let isPinyin = mode == .pinyin
         let maxLen = isPinyin ? SentenceConfig.pinyinMaxCodeLength
@@ -232,47 +233,21 @@ final class SentenceLexicon {
             guard let text = String(data: data, encoding: .utf8) else { continue }
             loadedPath = path
             for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-                // 分隔符兼容制表符与空格（琉璃表原格式为 tab，允许空格排版）
-                guard let spaceIndex = line.firstIndex(where: { $0 == " " || $0 == "\t" }) else { continue }
-                if isPinyin {
-                    // 拼音表：`码 词1 词2 …`，逐词入边（行内词序 = rank）。
-                    // 每码截到 pinyinEdgeMaxRank：短码重码深（yi 577 选），
-                    // 全 rank 入边会让 allowDuplicateSingle 的 beam 扩展爆炸，
-                    // 建表时截掉是最省解码热路径的做法（见 SentenceConfig 注释）。
-                    let code = String(line[line.startIndex..<spaceIndex]).lowercased()
-                    guard isSimpleCode(code) else { continue }
-                    let len = code.count
-                    guard len >= 1, len <= maxLen else { continue }
-                    var edges = codes[code] ?? []
-                    guard edges.count < SentenceConfig.pinyinEdgeMaxRank else { continue }
-                    var words = line[line.index(after: spaceIndex)...]
-                        .split(whereSeparator: { $0 == " " || $0 == "\t" })
-                        .map(String.init)
-                    words.removeAll { $0.isEmpty }
-                    for entryText in words {
-                        if edges.count >= SentenceConfig.pinyinEdgeMaxRank { break }
-                        if edges.contains(where: { $0.text == entryText }) { continue }
-                        edges.append(SentenceEdge(text: entryText, rank: edges.count + 1))
-                        entryCount += 1
-                        if entryText.count == 1 {
-                            if let existing = optimalSingleCode[entryText] {
-                                if len < existing.count { optimalSingleCode[entryText] = code }
-                            } else {
-                                optimalSingleCode[entryText] = code
-                            }
-                        }
-                    }
-                    codes[code] = edges
-                    lengthValues.insert(len)
-                    continue
-                }
-                let entryText = String(line[line.startIndex..<spaceIndex])
-                let code = String(line[line.index(after: spaceIndex)...].trimmingCharacters(in: .whitespaces))
+                // 只支持统一格式：`候选\t编码`（# 注释与空行跳过）
+                if line.hasPrefix("#") { continue }
+                let parts = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
+                guard parts.count == 2 else { continue }
+                let entryText = parts[0].trimmingCharacters(in: .whitespaces)
+                let code = parts[1].trimmingCharacters(in: .whitespaces)
                 guard !entryText.isEmpty, isSimpleCode(code) else { continue }
                 let len = code.count
                 guard len >= 1, len <= maxLen else { continue }
 
                 var edges = codes[code] ?? []
+                // 拼音短码重码深（yi 577 选）：每码截到 pinyinEdgeMaxRank，
+                // 全 rank 入边会让 allowDuplicateSingle 的 beam 扩展爆炸，
+                // 建表时截掉是最省解码热路径的做法（见 SentenceConfig 注释）。
+                if isPinyin, edges.count >= SentenceConfig.pinyinEdgeMaxRank { continue }
                 // 同 (code,text) 去重：rank 用"该 code 下第 n 条"（与虎整句一致）
                 if edges.contains(where: { $0.text == entryText }) {
                     continue
