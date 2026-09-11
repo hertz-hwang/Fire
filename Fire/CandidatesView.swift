@@ -38,15 +38,18 @@ struct CandidateView: View {
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
+        // @Default(.themeConfig) 每次读取都会走 UserDefaults + JSON 解码；
+        // 候选栏每键刷新会访问几十次，这里按键求值只解码一次。
+        let theme = themeConfig[colorScheme]
         let indexColor = selected
-            ? themeConfig[colorScheme].selectedIndexColor
-            : themeConfig[colorScheme].candidateIndexColor
+            ? theme.selectedIndexColor
+            : theme.candidateIndexColor
         let textColor = selected
-            ? themeConfig[colorScheme].selectedTextColor
-            : themeConfig[colorScheme].candidateTextColor
+            ? theme.selectedTextColor
+            : theme.candidateTextColor
         let codeColor = selected
-            ? themeConfig[colorScheme].selectedCodeColor
-            : themeConfig[colorScheme].candidateCodeColor
+            ? theme.selectedCodeColor
+            : theme.candidateCodeColor
 
         return HStack(alignment: .center, spacing: 2) {
             if indexVisible {
@@ -127,7 +130,8 @@ struct CandidatesView: View {
         disabled: Bool,
         eventName: Notification.Name
     ) -> some View {
-        let size = CGFloat(themeConfig[colorScheme].fontSize) * 0.5
+        let theme = themeConfig[colorScheme]
+        let size = CGFloat(theme.fontSize) * 0.5
         return Image(imageName)
             .renderingMode(.template)
             .resizable()
@@ -141,8 +145,8 @@ struct CandidatesView: View {
                 )
             }
             .foregroundColor(Color(disabled
-                                   ? themeConfig[colorScheme].pageIndicatorDisabledColor
-                                   : themeConfig[colorScheme].pageIndicatorColor
+                                   ? theme.pageIndicatorDisabledColor
+                                   : theme.pageIndicatorColor
                                   ))
     }
 
@@ -170,34 +174,36 @@ struct CandidatesView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: CGFloat( themeConfig[colorScheme].originCandidatesSpace), content: {
+        // 同 CandidateView：body 求值一次解码，后续全部复用
+        let theme = themeConfig[colorScheme]
+        return VStack(alignment: .leading, spacing: CGFloat(theme.originCandidatesSpace), content: {
             if showCodeInWindow {
                 Text(origin)
-                    .foregroundColor(Color(themeConfig[colorScheme].originCodeColor))
+                    .foregroundColor(Color(theme.originCodeColor))
                     .fixedSize()
             }
             if direction == CandidatesDirection.horizontal {
-                HStack(alignment: .center, spacing: CGFloat(themeConfig[colorScheme].candidateSpace)) {
+                HStack(alignment: .center, spacing: CGFloat(theme.candidateSpace)) {
                     _candidatesView
                     _indicator
                 }
                 .fixedSize()
             } else {
-                VStack(alignment: .leading, spacing: CGFloat(themeConfig[colorScheme].candidateSpace)) {
+                VStack(alignment: .leading, spacing: CGFloat(theme.candidateSpace)) {
                     _candidatesView
                     _indicator
                 }
                 .fixedSize()
             }
         })
-            .padding(.top, CGFloat(themeConfig[colorScheme].windowPaddingTop))
-            .padding(.bottom, CGFloat(themeConfig[colorScheme].windowPaddingBottom))
-            .padding(.leading, CGFloat(themeConfig[colorScheme].windowPaddingLeft))
-            .padding(.trailing, CGFloat(themeConfig[colorScheme].windowPaddingRight))
+            .padding(.top, CGFloat(theme.windowPaddingTop))
+            .padding(.bottom, CGFloat(theme.windowPaddingBottom))
+            .padding(.leading, CGFloat(theme.windowPaddingLeft))
+            .padding(.trailing, CGFloat(theme.windowPaddingRight))
             .fixedSize()
-            .font(.system(size: CGFloat(themeConfig[colorScheme].fontSize)))
-            .background(Color(themeConfig[colorScheme].windowBackgroundColor))
-            .cornerRadius(CGFloat(themeConfig[colorScheme].windowBorderRadius), antialiased: true)
+            .font(.system(size: CGFloat(theme.fontSize)))
+            .background(Color(theme.windowBackgroundColor))
+            .cornerRadius(CGFloat(theme.windowBorderRadius), antialiased: true)
     }
 }
 

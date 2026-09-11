@@ -45,6 +45,7 @@ class DictManager {
         prepareStatement()
     }
     func close() {
+        invalidateUserDictCache()
         sqlite3_finalize(queryStatement)
         queryStatement = nil
         sqlite3_finalize(reverseLookupStatement)
@@ -74,6 +75,7 @@ class DictManager {
     }
 
     private func prepareStatement() {
+        invalidateUserDictCache()
         if database == nil {
             sqlite3_open_v2(getDatabaseURL().path, &database, SQLITE_OPEN_READWRITE, nil)
             sqlite3_exec(database, "PRAGMA case_sensitive_like=ON;", nil, nil, nil)
@@ -368,6 +370,7 @@ class DictManager {
             if sqlite3_step(insertStatement) == SQLITE_DONE {
                 sqlite3_finalize(insertStatement)
                 insertStatement = nil
+                invalidateUserDictCache()
                 return true
             }
         }
@@ -397,6 +400,7 @@ class DictManager {
         }
         sqlite3_finalize(stmt)
         stmt = nil
+        invalidateUserDictCache()
         NotificationQueue.default.enqueue(Notification(name: DictManager.userDictUpdated), postingStyle: .whenIdle)
     }
 
@@ -460,6 +464,7 @@ class DictManager {
             values \(values)
         """
         sqlite3_exec(database, sql, nil, nil, nil)
+        invalidateUserDictCache()
     }
 
     /// 用户词库批量入库（带可选权重）。code 为空的行只服务整句加权。
@@ -480,6 +485,7 @@ class DictManager {
         }.joined(separator: ",")
         let columns = hasWeight ? "id, wbcode, text, type, query, weight" : "id, wbcode, text, type, query"
         sqlite3_exec(database, "insert into wb_py_dict(\(columns)) values \(values)", nil, nil, nil)
+        invalidateUserDictCache()
     }
 
     private func columnExists(_ name: String) -> Bool {
@@ -574,6 +580,7 @@ class DictManager {
     }
 
     func updateUserDict(_ dictContent: String) {
+        invalidateUserDictCache()
         // 1. 先删除之前的用户词库
         sqlite3_exec(database, "delete from wb_py_dict where type = '\(CandidateType.user.rawValue)'", nil, nil, nil)
         // 2. 添加用户词库（支持行首 [权重]）
@@ -586,32 +593,86 @@ class DictManager {
     /// 编码精确匹配的用户词（含 {yyyy} 等日期变量替换），用于整句模式叠加
     /// 自定义短语（如 `date {yyyy}{MM}{dd}`）。只做整码精确匹配：整句模式下
     /// 候选栏归整句引擎，只有编码已被完整打全的自定义短语才值得置顶。
+    ///
+    /// 走内存快照（userDictRowsById）：整句模式下这两个用户查询每键都执行，
+    /// 每次现场 prepare+step 是纯固定开销；用户词库变更点统一调
+    /// invalidateUserDictCache()，快照与库的一致性窗口仅存在于"写库到失效调用"
+    /// 之间（同线程顺序执行，实际为 0）。
     func getUserCandidates(matching query: String) -> [Candidate] {
-        guard let database = database, !query.isEmpty else { return [] }
-        let sql = "select query, text from wb_py_dict where type = '\(CandidateType.user.rawValue)' and query = ? order by id asc limit 10"
-        var stmt: OpaquePointer?
-        defer { sqlite3_finalize(stmt) }
-        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        sqlite3_bind_text(stmt, 1, query, -1, SQLITE_TRANSIENT)
+        guard !query.isEmpty else { return [] }
         var candidates: [Candidate] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let code = String(cString: sqlite3_column_text(stmt, 0))
-            let text = replaceTextWithVars(String(cString: sqlite3_column_text(stmt, 1)))
-            candidates.append(Candidate(code: code, text: text, type: .user))
+        for row in userDictSnapshot() where row.code == query {
+            candidates.append(Candidate(code: row.code,
+                                        text: replaceTextWithVars(row.text),
+                                        type: .user))
+            if candidates.count >= 10 { break }
         }
         return candidates
     }
 
     /// 是否存在以 query 为前缀（或相等）的用户码——整句自动上屏用它做保护：
     /// 编码还可能是用户自定义短语（如 `date {yyyy}{MM}{dd}`）的前缀时不提前上屏。
+    /// 原 SQL 是 `query glob ?`（无法用索引，全表扫）；内存前缀判定 O(码数)，
+    /// 用户码量级（≤几千）下为微秒级。语义对齐：GLOB 大小写敏感、
+    /// 整句编码字符集（a-zA-Z0-9;'）不含 glob 元字符，前缀比较与 glob 等价。
     func hasUserDictPrefix(matching query: String) -> Bool {
-        guard let database = database, !query.isEmpty else { return false }
-        let sql = "select 1 from wb_py_dict where type = '\(CandidateType.user.rawValue)' and query <> '' and query glob ? limit 1"
-        var stmt: OpaquePointer?
-        defer { sqlite3_finalize(stmt) }
-        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
-        sqlite3_bind_text(stmt, 1, query + "*", -1, SQLITE_TRANSIENT)
-        return sqlite3_step(stmt) == SQLITE_ROW
+        guard !query.isEmpty else { return false }
+        for code in userDictCodesSnapshot() where code.hasPrefix(query) {
+            return true
+        }
+        return false
+    }
+
+    // MARK: - 用户词库内存快照（整句热路径专用）
+
+    private struct UserDictRow {
+        let id: Int
+        let code: String
+        let text: String
+    }
+    /// 按 id 升序的全部用户词行（query 为空的纯加权词条也保留，
+    /// 但 code 为空的行不会命中任何前缀/精确匹配——query <> '' 语义天然满足）
+    private var userDictRowsCache: [UserDictRow]?
+    /// 去重后的非空用户码集合（前缀扫描用，保持插入序= id 升序）
+    private var userCodesCache: [String]?
+
+    private func userDictSnapshot() -> [UserDictRow] {
+        if let rows = userDictRowsCache { return rows }
+        var rows: [UserDictRow] = []
+        if let database = database {
+            let sql = "select id, query, text from wb_py_dict where type = '\(CandidateType.user.rawValue)' order by id asc"
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    let code = String(cString: sqlite3_column_text(stmt, 1))
+                    let text = String(cString: sqlite3_column_text(stmt, 2))
+                    rows.append(UserDictRow(id: Int(sqlite3_column_int(stmt, 0)),
+                                            code: code, text: text))
+                }
+            }
+        }
+        userDictRowsCache = rows
+        var seen = Set<String>()
+        var codes: [String] = []
+        for row in rows where !row.code.isEmpty && !seen.contains(row.code) {
+            seen.insert(row.code)
+            codes.append(row.code)
+        }
+        userCodesCache = codes
+        return rows
+    }
+
+    private func userDictCodesSnapshot() -> [String] {
+        if let codes = userCodesCache { return codes }
+        userDictSnapshot()
+        return userCodesCache ?? []
+    }
+
+    /// 所有用户词库写路径（含删/插/批量重建/库重开）必须调用
+    func invalidateUserDictCache() {
+        userDictRowsCache = nil
+        userCodesCache = nil
     }
 
     func getUserCandidates() -> [Candidate] {

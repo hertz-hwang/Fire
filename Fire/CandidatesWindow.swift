@@ -31,6 +31,12 @@ class CandidatesWindow: NSWindow, NSWindowDelegate {
         limitFrameInScreen()
     }
 
+    // 上一次"钉位"时的 (topLeft, frame)：整句编码下按键高频刷窗，重复的
+    // orderFront/setFrameTopLeftPoint 会反复触发约束系统全树布局
+    // （live sample 里每键 1~3ms）。注意窗口随内容增高时 Cocoa 以左下角为锚，
+    // top-left 会漂移，所以 frame 尺寸变化时必须重新钉位。
+    private var lastPin: (topLeft: NSPoint, frame: NSRect)?
+
     func setCandidates(
         _ candidatesData: CandidatesData,
         originalString: String,
@@ -44,9 +50,21 @@ class CandidatesWindow: NSWindow, NSWindowDelegate {
         hostingView.rootView.highlightIndex = highlightIndex
         fireLog("origin top left: \(topLeft)")
         fireLog("candidates: \(candidatesData)")
-        self.setFrameTopLeftPoint(topLeft)
-        self.orderFront(nil)
+        // 位置与尺寸都未变才跳过钉位
+        if lastPin == nil || lastPin!.topLeft != topLeft || lastPin!.frame != self.frame {
+            lastPin = (topLeft, self.frame)
+            self.setFrameTopLeftPoint(topLeft)
+        }
+        // 已可见则跳过 orderFront，避免每键重入窗口排序
+        if !self.isVisible {
+            self.orderFront(nil)
+        }
 //        NSApp.setActivationPolicy(.prohibited)
+    }
+
+    override func close() {
+        lastPin = nil
+        super.close()
     }
 
     func bindEvents() {

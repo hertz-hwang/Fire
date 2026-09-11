@@ -323,6 +323,13 @@ final class SentenceDecoder {
     /// 单字缓存：文本 -> [Unicode scalar]
     private var charCache: [String: [UInt32]] = [:]
 
+    #if DEBUG
+    /// DEBUG 增量校验抽检间隔（每 N 次增量解码全量对比一次；退格后必验）
+    static let debugVerifyEvery = 8
+    /// 跨会话共享计数：避免每个会话的校验都落在同一个码长上
+    private static var incrementalDecodeCount = 0
+    #endif
+
     @inline(__always)
     fileprivate func scalarsOf(_ text: String) -> [UInt32] {
         if let cached = charCache[text] { return cached }
@@ -742,10 +749,13 @@ final class SentenceDecoder {
         var buckets: [SentenceBucket?]? = nil
         let oldRaw = cachedRaw
         let oldN = oldRaw.count
+        // 本键是否走了增量复用（fresh 构建无需校验——它本身就是全量）
+        var usedIncremental = false
 
         if oldN > 0 {
             if oldRaw == raw, cachedBuckets.count == length + 1 {
                 buckets = cachedBuckets
+                usedIncremental = true
             } else if oldN <= 4 || length <= 4 {
                 buckets = nil
             } else if length > oldN, Array(raw.prefix(oldN)) == oldRaw {
@@ -764,8 +774,10 @@ final class SentenceDecoder {
                            minimumConsumedEnd: oldN,
                            allowDuplicateSingle: allowDuplicate)
                 buckets = reused
+                usedIncremental = true
             } else if length < oldN, Array(oldRaw.prefix(length)) == raw {
                 buckets = Array(cachedBuckets.prefix(length + 1))
+                usedIncremental = true
             }
         }
 
@@ -784,8 +796,19 @@ final class SentenceDecoder {
 
         #if DEBUG
         // 增量一致性断言（虎整句 results_equal 思路）。增量复用出 bug 表现为
-        // 长句偶尔跳字且极难复现，这是唯一能兜住的手段。
-        if length > 4 {
+        // 长句偶尔跳字且极难复现。
+        //
+        // 性能闸门：decodeFull 是一次完整的冷解码（长编码下 20~80ms），
+        // 原先每键必跑会把 Debug 按键延迟垫到 75~95ms/键。改为：
+        //   1) 只在真正走了增量路径的解码上校验（fresh 构建本身就是全量，无对比意义）；
+        //   2) 增量校验每 debugVerifyEvery 次抽检一次；
+        //   3) 退格（length 变短）后必验一次——截尾缓存复用是最易错的分支；
+        //   4) 校验不匹配时立刻断言，行为与原逻辑一致。
+        Self.incrementalDecodeCount += 1
+        let backspaced = length < oldN && oldN > 0
+        let mustVerify = backspaced
+            || (usedIncremental && Self.incrementalDecodeCount % Self.debugVerifyEvery == 0)
+        if usedIncremental && mustVerify && length > 4 {
             let full = decodeFull(raw, includeEarlyCommit: includeEarlyCommit,
                                   allowDuplicateSingle: allowDuplicate, context: context)
             let incremental = result.candidates.map {

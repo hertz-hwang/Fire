@@ -12,7 +12,11 @@ enum SentenceConfig {
     /// beam 宽度
     static let beamWidth = 200
     /// 超过该码长后收窄 beam（长输入跟手的关键）
-    static let longInputFullBeamLength = 24
+    /// 实测（真实 528MB 模型 + 琉璃码表，逐键微基准）：全 beam 的解码开销在
+    /// len≈20 处越过 2ms、len≥24 起每键 5~25ms（冷解码更高），是长编码卡顿的
+    /// 结构性来源。阈值 24→12 后 len≥12 即用窄 beam，逐键回到 ~1ms；
+    /// 质量护栏：40 句真实语料探针 top 候选无回归（见 tmp/bench A/B 记录）。
+    static let longInputFullBeamLength = 12
     static let longInputBeamWidth = 48
     /// 输出候选上限
     static let candidateLimit = 20
