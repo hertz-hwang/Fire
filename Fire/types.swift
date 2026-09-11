@@ -249,6 +249,21 @@ enum CodeMode: Int, CaseIterable, Decodable, Encodable, Defaults.Serializable {
     case wubiPinyin
 }
 
+/// 拼音方案的锁定默认项：整句强制开、自动上屏强制关（统一空格上屏）、
+/// 单字重码组句强制开、提示编码/z键查询/z键重复上屏强制关。
+/// 设置面板置灰这些控件，此处保证运行时行为一致：
+/// 启动时归一一次（覆盖老版本残留配置），切方案时由引擎再归一。
+func enforcePinyinInputModeDefaults() {
+    guard Defaults[.codeMode] == .pinyin else { return }
+    if !Defaults[.enableSentenceMode] { Defaults[.enableSentenceMode] = true }
+    if Defaults[.enableSentenceAutoCommit] { Defaults[.enableSentenceAutoCommit] = false }
+    if Defaults[.commitMode] != .spaceCommit { Defaults[.commitMode] = .spaceCommit }
+    if !Defaults[.enableSentenceAllowDuplicateSingle] { Defaults[.enableSentenceAllowDuplicateSingle] = true }
+    if Defaults[.wubiCodeTip] { Defaults[.wubiCodeTip] = false }
+    if Defaults[.zKeyQuery] { Defaults[.zKeyQuery] = false }
+    if Defaults[.zKeyRepeat] { Defaults[.zKeyRepeat] = false }
+}
+
 enum CodeInWindowMode: Int, Decodable, Encodable, Defaults.Serializable {
     case inputCode      // 显示输入码（默认）
     case firstCandidate // 显示首选项

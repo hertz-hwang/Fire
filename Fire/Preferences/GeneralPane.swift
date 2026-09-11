@@ -43,6 +43,20 @@ struct GeneralPane: View {
         return map[n] ?? "\(n)"
     }
 
+    /// 拼音方案锁定整套编码行为：整句+空格上屏，其余互斥项一律固定（置灰不可改）
+    private var isPinyin: Bool { code == .pinyin }
+
+    private func enforcePinyinDefaults() {
+        guard isPinyin else { return }
+        enableSentenceMode = true
+        enableSentenceAutoCommit = false
+        commitMode = .spaceCommit
+        enableSentenceAllowDuplicateSingle = true
+        wubiCodeTip = false
+        zKeyQuery = false
+        zKeyRepeat = false
+    }
+
     var body: some View {
         Settings.Container(contentWidth: 450.0) {
             Settings.Section(title: "") {
@@ -56,19 +70,15 @@ struct GeneralPane: View {
                                     Text("码表拼音混合").tag(CodeMode.wubiPinyin)
                                 }
                                 .frame(width: 180)
-                                .onChange(of: code) { newCode in
-                                    // 拼音方案默认整句（码表仍用 py_table.txt），
-                                    // 不启用自动上屏，统一空格上屏
-                                    if newCode == .pinyin {
-                                        enableSentenceMode = true
-                                        enableSentenceAutoCommit = false
-                                        commitMode = .spaceCommit
-                                    }
+                                .onChange(of: code) { _ in
+                                    enforcePinyinDefaults()
                                 }
                                 Spacer(minLength: 50)
                             }
                             HStack {
                                 Toggle("整句", isOn: $enableSentenceMode)
+                                    // 拼音方案强制整句：勾选锁定不可改
+                                    .disabled(isPinyin)
                                 Spacer(minLength: 50)
                             }
                             HStack {
@@ -77,7 +87,7 @@ struct GeneralPane: View {
                                         Text("\(n)").tag(n)
                                     }
                                 }
-                                .disabled(enableSentenceMode)
+                                .disabled(isPinyin || enableSentenceMode)
                                 Spacer(minLength: 20)
                                 Picker("上屏模式", selection: $commitMode) {
                                     Text("空格上屏").tag(CommitMode.spaceCommit)
@@ -88,16 +98,20 @@ struct GeneralPane: View {
                                     Text("\(chineseNumber(maxCodeLength + 1))二顶").tag(CommitMode.commitAtM2)
                                     Text("\(chineseNumber(maxCodeLength + 1))三顶").tag(CommitMode.commitAtM3)
                                 }
-                                .disabled(enableSentenceMode)
+                                .disabled(isPinyin || enableSentenceMode)
                                 Spacer(minLength: 50)
                             }
                             if enableSentenceMode {
                                 HStack {
                                     Toggle("自动上屏", isOn: $enableSentenceAutoCommit)
+                                        // 拼音方案统一空格上屏：不可启用自动上屏
+                                        .disabled(isPinyin)
                                     Spacer(minLength: 50)
                                 }
                                 HStack {
                                     Toggle("单字重码组句", isOn: $enableSentenceAllowDuplicateSingle)
+                                        // 拼音方案固定启用（词表侧已按 rank 截断防爆）
+                                        .disabled(isPinyin)
                                     Spacer(minLength: 50)
                                 }
                                 HStack {
@@ -133,16 +147,20 @@ struct GeneralPane: View {
                             }
                             HStack {
                                 Toggle("提示编码", isOn: $wubiCodeTip)
+                                    // 拼音方案整句走精确码边，固定关闭
+                                    .disabled(isPinyin)
                                 Spacer(minLength: 50)
                             }
                             HStack {
                                 Toggle("z键查询", isOn: $zKeyQuery)
                                     // 整句走精确码边，没有 xxx* 通配查询的余地
-                                    .disabled(enableSentenceMode)
+                                    .disabled(isPinyin || enableSentenceMode)
                                 Spacer(minLength: 50)
                             }
                             HStack {
                                 Toggle("z键重复上屏", isOn: $zKeyRepeat)
+                                    // 拼音方案固定关闭
+                                    .disabled(isPinyin)
                                 Spacer(minLength: 50)
                             }
                         }

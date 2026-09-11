@@ -81,6 +81,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !commandHandler() {
             return
         }
+        // 拼音方案锁定项归一（覆盖老版本升级残留的自由配置）
+        enforcePinyinInputModeDefaults()
         if !hasDict() {
             NSLog("[Fire] first run，build dict")
             buildDict()

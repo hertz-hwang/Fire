@@ -752,12 +752,12 @@ class FireInputController: IMKInputController {
         // 当前输入的是数字,选择当前候选列表中的第N个字符 v
         if let pos = Int(string) {
             if _originalString.count > 0 {
-                // 整句激活时数字不选候选：数字写进编码当选重符（虎整句 2=第2码…），
-                // 固定该段用字但不上屏
+                // 整句激活时数字照常选候选（虎整句"数字当选重符"的语义已取消）；
+                // 越界数字吞掉，避免数字混进编码被 parse_selector 当选重符解析
                 if _sentenceActive {
-                    if _originalString.count < SentenceConfig.maxRawLength {
-                        _originalString += string
-                        SentenceEngine.shared.evidenceInvalidated(_sentenceSession)
+                    let index = pos - 1
+                    if index >= 0 && index < _candidates.count {
+                        insertCandidate(_candidates[index])
                     }
                     return true
                 }

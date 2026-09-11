@@ -102,6 +102,9 @@ final class SentenceEngine {
         epochObserver = Defaults.observe(keys: .enableSentenceMode, .enableSentenceAutoCommit,
                                          .codeMode, .sentenceModelPath, .wbTablePath, .pyTablePath) { [weak self] in
             guard let self = self else { return }
+            // 拼音方案锁定输入行为（整句开/自动上屏关/空格上屏…），
+            // 覆盖设置面板之外的任何写入路径；已锁定时内部判等不重复写入
+            enforcePinyinInputModeDefaults()
             self.epoch += 1
             SentenceLexicon.shared.markDirty()
         }
