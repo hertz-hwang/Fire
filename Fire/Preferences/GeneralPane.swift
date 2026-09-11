@@ -56,6 +56,15 @@ struct GeneralPane: View {
                                     Text("码表拼音混合").tag(CodeMode.wubiPinyin)
                                 }
                                 .frame(width: 180)
+                                .onChange(of: code) { newCode in
+                                    // 拼音方案默认整句（码表仍用 py_table.txt），
+                                    // 不启用自动上屏，统一空格上屏
+                                    if newCode == .pinyin {
+                                        enableSentenceMode = true
+                                        enableSentenceAutoCommit = false
+                                        commitMode = .spaceCommit
+                                    }
+                                }
                                 Spacer(minLength: 50)
                             }
                             HStack {

@@ -55,6 +55,14 @@ enum SentenceConfig {
 
     /// 拼音模式码长上限（py_table 有 20 键长条目，全放进去分支太宽）
     static let pinyinMaxCodeLength = 12
+    /// 拼音模式每码参与组句的边数上限（建表时截断）。
+    /// 拼音码表是自然重码结构：`yi` 有 577 个单字、`shijie` 命中 756 条边，
+    /// 单字重码组句（allowDuplicateSingle）放开全 rank 时每个位置扇出上百条边，
+    /// beam 扩展组合爆炸——实测 5 键起每键 1~3 秒。建表时截到每码前 8 条
+    /// 后逐键回到 avg 6~9ms（cap 12/20 实测 avg 仍 15~55ms，8 是拐点）；
+    /// 候选栏最多 9 项一页，8 个重码不影响组句质量探针。
+    /// 显式选重（`;`/数字）也只能选中截断范围内的 rank。
+    static let pinyinEdgeMaxRank = 8
     /// 码表模式码长硬上限（用户自定义长码保护）
     static let wubiMaxCodeLength = 8
 }

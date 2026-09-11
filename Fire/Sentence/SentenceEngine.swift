@@ -100,7 +100,7 @@ final class SentenceEngine {
         }
         // wbTablePath 变化：整句码表按方案自动匹配不同文件，必须打脏重建
         epochObserver = Defaults.observe(keys: .enableSentenceMode, .enableSentenceAutoCommit,
-                                         .codeMode, .sentenceModelPath, .wbTablePath) { [weak self] in
+                                         .codeMode, .sentenceModelPath, .wbTablePath, .pyTablePath) { [weak self] in
             guard let self = self else { return }
             self.epoch += 1
             SentenceLexicon.shared.markDirty()
