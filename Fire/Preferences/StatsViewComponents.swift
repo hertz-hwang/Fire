@@ -639,7 +639,7 @@ struct InputDetailsView: View {
             HStack {
                 Picker("类型", selection: $model.typeFilter) {
                     Text("全部").tag("all")
-                    Text("五笔").tag("wb")
+                    Text("形码").tag("wb")
                     Text("拼音").tag("py")
                     Text("用户词").tag("user")
                 }
@@ -781,7 +781,7 @@ struct InputDetailsView: View {
 
     private func typeLabel(_ t: String) -> String {
         switch t {
-        case "wb": return "五笔"
+        case "wb": return "形码"
         case "py": return "拼音"
         case "user": return "用户"
         case "placeholder": return "占位"
@@ -985,7 +985,7 @@ struct WordFrequencyView: View {
 
             Picker("类型", selection: $model.typeFilter) {
                 Text("全部").tag("all")
-                Text("五笔").tag("wb")
+                Text("形码").tag("wb")
                 Text("拼音").tag("py")
                 Text("用户词").tag("user")
             }

@@ -14,8 +14,8 @@
 // 编译：
 //   clang++ -std=c++17 -O3 -arch arm64 tools/ngram/fast_train.cpp -o tools/ngram/fast_train
 // 用法：
-//   tools/ngram/fast_train --corpus tools/ngram/corpus --out ngram.bin \
-//       --jobs 12 --min-tri-count 2
+//   tools/ngram/fast_train --corpus tools/ngram/corpus --out Fire/Resources/sentence-ngram-mobile.bin \
+//       --jobs 12 --min-tri-count 1
 
 #include <fcntl.h>
 #include <sys/mman.h>

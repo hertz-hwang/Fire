@@ -138,7 +138,7 @@ class FireInputController: IMKInputController {
             client()?.setMarkedText(text, selectionRange: selectionRange(), replacementRange: replacementRange())
         }
     }
-    
+
     private func getPreviousText(_ count: Int = 1) -> String {
         // 中文输入模式下，markedRange 会跟随输入字符变化
         // 不同APP下，对selectedRange的location处理不同，有的把location放在组字区后，比如备忘录APP，有的把location放在组字区前，比如Chrome浏览器，此处根据大小判断一下
@@ -382,7 +382,7 @@ class FireInputController: IMKInputController {
                 Notification(name: DictManager.userDictUpdated), postingStyle: .whenIdle)
             Utils.shared.showMessage("已添加新词【\(text)】\(code)")
         } else {
-            Utils.shared.showMessage("无法为【\(text)】生成五笔码")
+            Utils.shared.showMessage("无法为【\(text)】生成编码")
         }
         // clean() 会清空 _originalString 触发 markText 清除组词占位的合成串，并重置 _combineCount、关闭候选窗
         clean()

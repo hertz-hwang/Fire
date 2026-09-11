@@ -49,7 +49,7 @@ struct ThesaurusPane: View {
                         VStack(spacing: 6) {
                             HStack {
                                 Group {
-                                    Text("五笔词库: ")
+                                    Text("形码词库: ")
                                     Text(wbTablePath)
                                         .lineLimit(1)
                                         .padding(.horizontal, 6)
