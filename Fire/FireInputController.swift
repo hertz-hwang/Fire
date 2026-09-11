@@ -686,18 +686,29 @@ class FireInputController: IMKInputController {
     // 整句自动上屏：插入文字，组字区只保留未消费的键
     private func autoCommitSentenceText(_ commit: SentenceAutoCommit) {
         let text = commit.text
+        // 统计需要真实编码：insertText 的 clean() 会清空 _originalString，
+        // 先在此捕获上屏前完整 raw，上屏消耗掉的编码 = raw 去掉 retainedRaw 后缀
+        let rawBefore = _originalString
         insertText(text)
         // insertText 内部 clean() 会清空 _originalString，这里恢复未消费的尾码
         _originalString = commit.retainedRaw
         if commit.retainedRaw.isEmpty {
             CandidatesWindow.shared.close()
         }
-        notifySentenceCommit(text)
+        notifySentenceCommit(text, code: autoCommitCode(rawBefore: rawBefore))
+    }
+
+    /// 自动上屏消耗掉的原始编码（raw 的前缀，长度为 raw − retainedRaw）
+    private func autoCommitCode(rawBefore: String) -> String {
+        let retained = _originalString
+        let consumedLength = max(0, min(rawBefore.count, rawBefore.count - retained.count))
+        return String(rawBefore.prefix(consumedLength))
     }
 
     // 自动上屏计入统计，否则"统计"里会漏掉整句自动上屏的字数
-    private func notifySentenceCommit(_ text: String) {
-        let candidate = Candidate(code: text, text: text, type: .sentence)
+    // code 必须是实际消耗的编码（而非上屏文字），否则"平均码长"会把文字长度当码长
+    private func notifySentenceCommit(_ text: String, code: String) {
+        let candidate = Candidate(code: code, text: text, type: .sentence)
         if text.contains(where: { $0.isChineseChar }) {
             Fire.shared.recentCommittedTexts.append(text)
             if Fire.shared.recentCommittedTexts.count > 20 {

@@ -409,22 +409,27 @@ class Statistics {
         return singleInt64(sql: sql, bind: today)
     }
 
-    /// 近 N 天（含今天）总字符数
+    /// 近 N 天（含今天）总字符数（createdAt 为本地时间，需用 localtime 对齐"天"）
     func queryTotalCount(daysBack: Int) -> Int64 {
         guard daysBack > 0 else { return queryTotalCount() }
         let sql = """
             SELECT COALESCE(SUM(LENGTH(text)), 0) FROM data
-            WHERE date(createdAt) >= date('now', ?)
+            WHERE date(createdAt) >= date('now', ?, 'localtime')
         """
         return singleInt64(sql: sql, bind: "-\(daysBack - 1) day")
     }
 
     /// 今日上屏次数与平均码长（code 非空视为候选上屏）
+    /// 注意：
+    /// 1. createdAt 以本地时区写入，`date('now')` 是 UTC，必须用
+    ///    `date('now','localtime')`，否则东八区清晨查"今日"匹配的是昨天的数据。
+    /// 2. 整句候选入库的 code 是候选栏展示用的分段码（如 "ni hao shi jie"），
+    ///    段间空格不是实际键入的编码，统计码长时须剔除。
     private func queryTodayMetrics() -> (Int64, Double) {
-        let commitSQL = "SELECT COUNT(*) FROM data WHERE date(createdAt) = date('now')"
+        let commitSQL = "SELECT COUNT(*) FROM data WHERE date(createdAt) = date('now', 'localtime')"
         let avgSQL = """
-            SELECT COALESCE(AVG(LENGTH(code)), 0) FROM data
-            WHERE date(createdAt) = date('now') AND code != ''
+            SELECT COALESCE(AVG(LENGTH(REPLACE(code, ' ', ''))), 0) FROM data
+            WHERE date(createdAt) = date('now', 'localtime') AND code != ''
         """
         let commits = singleInt64(sql: commitSQL)
         let avg = singleDouble(sql: avgSQL)
@@ -439,7 +444,7 @@ class Statistics {
                 COALESCE(SUM(LENGTH(text)), 0) AS chars,
                 COUNT(*) AS commits
             FROM data
-            WHERE date(createdAt) = date('now')
+            WHERE date(createdAt) = date('now', 'localtime')
             GROUP BY hour
             ORDER BY hour ASC
         """
@@ -591,7 +596,9 @@ class Statistics {
 
         let parser = DateFormatter()
         parser.dateFormat = "yyyy-MM-dd"
-        parser.timeZone = TimeZone(identifier: "UTC")
+        // createdAt 是本地时间字符串，日期比较必须用本地时区，
+        // 否则 UTC 解析会把"今天"算错一天，连续天数随之失真
+        parser.timeZone = TimeZone.current
 
         // 计算最长连续
         var maxStreak = 1
@@ -675,7 +682,7 @@ class Statistics {
     private func queryTodaySpeed() -> (Int, Int) {
         let sql = """
             SELECT createdAt, LENGTH(text), appBundleId FROM data
-            WHERE date(createdAt) = date('now')
+            WHERE date(createdAt) = date('now', 'localtime')
             ORDER BY createdAt ASC
         """
         var stmt: OpaquePointer?
@@ -817,7 +824,7 @@ class Statistics {
         let sql = """
             SELECT date(createdAt) AS d, SUM(LENGTH(text)) AS chars
             FROM data
-            WHERE date(createdAt) >= date('now', ?)
+            WHERE date(createdAt) >= date('now', ?, 'localtime')
             GROUP BY d
         """
         var stmt: OpaquePointer?
