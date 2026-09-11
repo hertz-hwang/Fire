@@ -190,7 +190,7 @@ extension Defaults.Keys {
 
     static let wbTablePath = Key<String>(
         "wbTableURL",
-        default: Bundle.main.resourceURL?.appendingPathComponent("wb_table.txt").path
+        default: Bundle.main.resourceURL?.appendingPathComponent("tiger_table.txt").path
             ?? "")
     static let pyTablePath = Key<String>(
         "pyTableURL",

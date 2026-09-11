@@ -74,6 +74,7 @@
 		AA5E0006000000000SENT006 /* sentence-ngram-mobile.bin in Resources */ = {isa = PBXBuildFile; fileRef = AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */; };
 		AA5E0007000000000SENT007 /* sentence-codes-liuli.txt in Resources */ = {isa = PBXBuildFile; fileRef = AA5E0007000000000SENT107 /* sentence-codes-liuli.txt */; };
 		AA5E0009000000000SENT009 /* sentence-codes-tiger.txt in Resources */ = {isa = PBXBuildFile; fileRef = AA5E0009000000000SENT109 /* sentence-codes-tiger.txt */; };
+		AA5E000A000000000SENT010 /* tiger_table.txt in Resources */ = {isa = PBXBuildFile; fileRef = AA5E000A000000000SENT110 /* tiger_table.txt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -158,6 +159,7 @@
 		AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */ = {isa = PBXFileReference; lastKnownFileType = file; path = "sentence-ngram-mobile.bin"; sourceTree = "<group>"; };
 		AA5E0007000000000SENT107 /* sentence-codes-liuli.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "sentence-codes-liuli.txt"; sourceTree = "<group>"; };
 		AA5E0009000000000SENT109 /* sentence-codes-tiger.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "sentence-codes-tiger.txt"; sourceTree = "<group>"; };
+		AA5E000A000000000SENT110 /* tiger_table.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = tiger_table.txt; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -319,6 +321,7 @@
 				AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */,
 				AA5E0007000000000SENT107 /* sentence-codes-liuli.txt */,
 				AA5E0009000000000SENT109 /* sentence-codes-tiger.txt */,
+				AA5E000A000000000SENT110 /* tiger_table.txt */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -483,6 +486,7 @@
 				AA5E0006000000000SENT006 /* sentence-ngram-mobile.bin in Resources */,
 				AA5E0007000000000SENT007 /* sentence-codes-liuli.txt in Resources */,
 				AA5E0009000000000SENT009 /* sentence-codes-tiger.txt in Resources */,
+				AA5E000A000000000SENT010 /* tiger_table.txt in Resources */,
 				67C9A00D2AB53E83000B5281 /* fire.pdf in Resources */,
 				67C9A0392AB53ED3000B5281 /* wb_98_table.txt in Resources */,
 				67C9A0092AB53E83000B5281 /* MainMenu.xib in Resources */,

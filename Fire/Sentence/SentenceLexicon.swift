@@ -3,7 +3,8 @@
 //  Fire
 //
 //  整句词图边表（移植虎整句 build_lexicon_index 的精简版）。
-//  内置方案：Resources/sentence-codes-tiger.txt（虎整句码表，明文
+//  内置方案：整句码表按所选形码词库自动匹配（Resources 下
+//  sentence-codes-tiger.txt / sentence-codes-liuli.txt，明文
 //  `文字 码`，文件序 = rank）；Application Support 同名文件可覆盖。
 //  与虎整句一致：不使用用户词覆盖层，rank 完全由码表文件序决定。
 //
@@ -141,18 +142,57 @@ final class SentenceLexicon {
         var loadedPath: String?
     }
 
-    /// 内置整句码表文件名（明文 `文字 码`，LF 行尾；当前默认虎整句）
-    static let codesFileName = "sentence-codes-tiger.txt"
+    /// 默认整句码表（无法判定形码方案时的兜底）
+    static let defaultCodesFileName = "sentence-codes-tiger.txt"
+
+    /// 整句码表文件名：必须与所选形码词库同一编码方案。虎码 的=u，
+    /// 琉璃/小叮当码 的=d——错配时整句边表打不中任何按键码，表现为
+    /// 设置换词库后整句全部失效。按词库文件名标记 → 内容嗅探 依次判定。
+    static func resolveCodesFileName() -> String {
+        let wbPath = Defaults[.wbTablePath]
+        let name = (wbPath as NSString).lastPathComponent.lowercased()
+        // 1. 文件名自带方案标记（liuli/tiger 及中文名），直接命中
+        if name.contains("tiger") || name.contains("虎") { return "sentence-codes-tiger.txt" }
+        if name.contains("liuli") || name.contains("琉璃") || name.contains("小叮当") {
+            return "sentence-codes-liuli.txt"
+        }
+        // 2. 内容嗅探：高频标记单字在各方案码空间里的编码（采样词库头部）
+        //    琉璃空间 {的:d,是:j,不:k,了:l,我:w} 虎码空间 {的:u,是:o,不:c,了:r,我:t}
+        let marks: [(ch: Character, liuli: String, tiger: String)] = [
+            ("的", "d", "u"), ("是", "j", "o"), ("不", "k", "c"),
+            ("了", "l", "r"), ("我", "w", "t"), ("人", "s", "j"),
+        ]
+        var hits = ["liuli": 0, "tiger": 0]
+        if let text = try? String(contentsOfFile: wbPath, encoding: .utf8) {
+            outer: for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+                let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
+                guard parts.count >= 2 else { continue }
+                let code = String(parts[0])
+                let words = parts.dropFirst().map(String.init)
+                for m in marks where words.contains(String(m.ch)) {
+                    if code == m.liuli { hits["liuli", default: 0] += 1 }
+                    if code == m.tiger { hits["tiger", default: 0] += 1 }
+                    if (hits["liuli"] ?? 0) >= 2 || (hits["tiger"] ?? 0) >= 2 { break outer }
+                }
+            }
+        }
+        if (hits["liuli"] ?? 0) >= 2 && (hits["liuli"] ?? 0) > (hits["tiger"] ?? 0) {
+            return "sentence-codes-liuli.txt"
+        }
+        // 3. 兜底：虎整句（默认方案）
+        return defaultCodesFileName
+    }
 
     private func candidateTablePaths() -> [String] {
+        let fileName = Self.resolveCodesFileName()
         var paths: [String] = []
         if let resourceURL = Bundle.main.resourceURL {
-            paths.append(resourceURL.appendingPathComponent(Self.codesFileName).path)
+            paths.append(resourceURL.appendingPathComponent(fileName).path)
         }
         if let supportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             paths.append(supportDir
                 .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Fire")
-                .appendingPathComponent(Self.codesFileName).path)
+                .appendingPathComponent(fileName).path)
         }
         return paths
     }
