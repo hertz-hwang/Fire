@@ -123,11 +123,34 @@ class FireInputController: IMKInputController {
             if Defaults[.showCodeInWindow] {
                 selected = self._originalString.count > 0 ? " " : ""
             } else if Defaults[.codeInWindowMode] == .firstCandidate && !self._originalString.isEmpty {
-                selected = _candidates.first?.text ?? self._originalString
+                selected = sentenceFocusedCandidate()?.text ?? _candidates.first?.text ?? self._originalString
+            } else if let segmented = sentenceSegmentedPreedit() {
+                selected = segmented
             }
             let text = NSAttributedString(string: selected, attributes: attributes)
             client()?.setMarkedText(text, selectionRange: selectionRange(), replacementRange: replacementRange())
         }
+    }
+
+    /// 整句焦点候选（高亮项），非整句态返回 nil
+    private func sentenceFocusedCandidate() -> Candidate? {
+        guard _sentenceActive, _sentenceHighlightIndex < _candidates.count else { return nil }
+        return _candidates[_sentenceHighlightIndex]
+    }
+
+    /// 整句模式下组字区按焦点候选的分段码显示（如 `sb ear lh mw ajt sba vbz gc`）。
+    /// 仅当分段码恰好覆盖全部已敲键时启用——含选重符（`;`/`'`/数字）时
+    /// 分段码已剥掉这些键，回退显示原码以免删键时显示与实际不一致。
+    private func sentenceSegmentedPreedit() -> String? {
+        guard !Defaults[.showCodeInWindow],
+              Defaults[.codeInWindowMode] != .firstCandidate,
+              !_originalString.isEmpty,
+              let focused = sentenceFocusedCandidate(),
+              focused.type == .sentence else { return nil }
+        let code = focused.code
+        guard code != _originalString,
+              code.filter({ $0 != " " }) == _originalString.filter({ $0 != " " }) else { return nil }
+        return code
     }
 
     // 组词模式下用一个空格占位标记合成串，保持合成态，确保方向键等被输入法消费而不传给应用
@@ -1163,8 +1186,11 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             topLeft: getOriginPoint(),
             highlightIndex: _sentenceActive ? _sentenceHighlightIndex : 0
         )
-        // 候选词更新后重新 mark，确保「显示首选项」模式下文本区显示当前首选
-        if !Defaults[.showCodeInWindow] && Defaults[.codeInWindowMode] == .firstCandidate {
+        // 候选词更新后重新 mark，确保组字区跟随焦点候选：
+        // 「显示首选项」模式下显示焦点候选文字；整句态刷新分段码空格分组。
+        // 非整句且非首选项模式时组字区不随候选变化，省一次 setMarkedText IPC。
+        if !Defaults[.showCodeInWindow],
+           Defaults[.codeInWindowMode] == .firstCandidate || _sentenceActive {
             markText()
         }
     }
@@ -1177,8 +1203,15 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         if Defaults[.showCodeInWindow] {
             return NSRange(location: 0, length: min(1, _originalString.count))
         }
-        if Defaults[.codeInWindowMode] == .firstCandidate, let first = _candidates.first {
-            return NSRange(location: 0, length: first.text.count)
+        if Defaults[.codeInWindowMode] == .firstCandidate {
+            // 与 markText 保持一致：整句态下取焦点候选，否则取首选
+            let selected = sentenceFocusedCandidate() ?? _candidates.first
+            if let selected = selected {
+                return NSRange(location: 0, length: selected.text.count)
+            }
+        } else if let segmented = sentenceSegmentedPreedit() {
+            // 分段码比原码多出字间空格，selection 需覆盖完整分段串
+            return NSRange(location: 0, length: segmented.count)
         }
         return NSRange(location: 0, length: _originalString.count)
     }
