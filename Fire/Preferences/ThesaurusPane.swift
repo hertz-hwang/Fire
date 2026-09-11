@@ -41,6 +41,27 @@ struct ThesaurusPane: View {
         return nil
     }
 
+    private func refreshModelStatus() {
+        // 懒加载语义下 loaded 初始恒为 false，面板打开时先如实显示，
+        // 再在后台 ensureLoaded 一次并回填真实状态。
+        if !NgramModel.shared.loaded && NgramModel.shared.loadError == nil {
+            modelLoaded = false
+            modelStatus = "就绪（首次整句输入时自动加载）"
+        } else {
+            modelLoaded = NgramModel.shared.loaded
+            modelStatus = NgramModel.shared.statusText()
+        }
+        DispatchQueue.global(qos: .utility).async {
+            NgramModel.shared.ensureLoaded()
+            let loaded = NgramModel.shared.loaded
+            let status = NgramModel.shared.statusText()
+            DispatchQueue.main.async {
+                modelLoaded = loaded
+                modelStatus = status
+            }
+        }
+    }
+
     var body: some View {
         Settings.Container(contentWidth: 450.0) {
             Settings.Section(title: "") {
@@ -154,6 +175,9 @@ struct ThesaurusPane: View {
                     }, label: {
                         Text("建立索引")
                     })
+                }
+                .onAppear {
+                    refreshModelStatus()
                 }
             }
         }
