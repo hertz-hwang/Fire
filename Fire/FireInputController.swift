@@ -996,8 +996,10 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         let count = _originalString.count
 
         // For M二顶/M三顶, build composite candidates when input length > prefixLength
+        // 整句可用时不走常规顶字组词：候选与编码消费完全归整句引擎
         if mode == .commitAtM2 || mode == .commitAtM3,
-           _originalString.first != DictManager.shared.tempEnTriggerPunctuation {
+           _originalString.first != DictManager.shared.tempEnTriggerPunctuation,
+           !sentenceBranchAllowed() {
             let prefixLength = mode == .commitAtM2 ? 2 : 3
             if count > prefixLength {
                 let prefix = String(_originalString.prefix(prefixLength))
@@ -1247,6 +1249,11 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
     private func shouldAutoCommitCandidate() -> Bool {
         // 整句激活：所有顶屏/空码顶字规则失效，上屏完全交给整句引擎
         if _sentenceActive { return false }
+        // 整句模式开启（非反查）：常规码表索引一律不得自动消费编码前缀。
+        // 否则会出现 `ngjswr` 被 M码顶悄悄顶成常规表「每个月」、preedit
+        // 只剩 `wr` 这类隐形消费——候选框里根本看不到那个词。
+        // 顶屏/空码顶字全部由整句引擎的 tryEarlyCommit/tryEmptyCodeCommit 负责。
+        if Defaults[.enableSentenceMode], _originalString.first != "`" { return false }
         if _originalString.first == DictManager.shared.tempEnTriggerPunctuation { return false }
         if _originalString.first == "`" { return false }
         let mode = Defaults[.commitMode]
