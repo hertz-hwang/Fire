@@ -3,7 +3,7 @@
 //  Fire
 //
 //  整句词图边表（移植虎整句 build_lexicon_index 的精简版）。
-//  内置方案：Resources/sentence-codes-liuli.txt（琉璃整句码表，明文
+//  内置方案：Resources/sentence-codes-tiger.txt（虎整句码表，明文
 //  `文字 码`，文件序 = rank）；Application Support 同名文件可覆盖。
 //  与虎整句一致：不使用用户词覆盖层，rank 完全由码表文件序决定。
 //
@@ -141,8 +141,8 @@ final class SentenceLexicon {
         var loadedPath: String?
     }
 
-    /// 内置整句码表文件名（明文 `文字 码`，琉璃整句）
-    static let codesFileName = "sentence-codes-liuli.txt"
+    /// 内置整句码表文件名（明文 `文字 码`，LF 行尾；当前默认虎整句）
+    static let codesFileName = "sentence-codes-tiger.txt"
 
     private func candidateTablePaths() -> [String] {
         var paths: [String] = []
