@@ -19,8 +19,24 @@ class FireInputController: IMKInputController {
     private var _lastInputIsAlphanumeric = false
     private var _lastPunctuationKeyCode: UInt16? = nil
     var _lastCommittedText = ""
-    private var _lastCommittedRange: NSRange?
+    // 最近一次 activateServer 的客户端：身份变化才清撤销栈（跨输入框防护），
+    // 同一输入框重复 activate 不清，避免上屏后误清撤销栈
+    weak var activateServerClient: IMKTextInput?
     private var _lastInputIsNumber = false
+    // 上屏撤销记录：每次真正插入输入框的文字（含自动插入的空格）记一条，
+    // 撤销快捷键按栈顶逐条回退，支持多级撤销
+    private var _committedRecords: [CommittedRecord] = []
+    private static let maxUndoDepth = 10
+
+    /// 上屏撤销记录：文字与其插入起始位置。
+    /// location 为 nil 表示上屏时应用未报告位置，撤销时按光标定位并校验文字，
+    /// 保证不会误删用户文字
+    struct CommittedRecord {
+        let text: String
+        let location: Int?
+        // NSRange 以 UTF-16 单元计，代理对(emoji等)会让 count 与实际长度不一致
+        var utf16Length: Int { text.utf16.count }
+    }
     private var _lastInputText = ""
     // 待二次确认删除的候选词，非 nil 时候选窗处于删除确认态
     private var _pendingDeleteCandidate: Candidate?
@@ -202,6 +218,9 @@ class FireInputController: IMKInputController {
         if let handled = undoCommitHotkeyHandler(event: event) {
             return handled
         }
+        if let handled = clearCodeHotkeyHandler(event: event) {
+            return handled
+        }
         // Ctrl+Shift+数字：从词库删除对应候选词
         // 按住 Shift 时数字键的 charactersIgnoringModifiers 会变成符号(如 Shift+1 -> !)，
         // 无法用 Int 解析，这里改用 keyCode 映射数字
@@ -255,14 +274,36 @@ class FireInputController: IMKInputController {
     }
 
     private func undoCommitHotkeyHandler(event: NSEvent) -> Bool? {
-        let required = FireInputController.modifierFlag(for: Defaults[.undoCommitShortcutModifier])
-        guard FireInputController.modifiersMatch(event.modifierFlags, required: required) else { return nil }
-        let key = Defaults[.undoCommitShortcutKey].lowercased()
-        guard let keyCode = FireInputController.keyCode(for: key) else { return nil }
-        if event.keyCode == keyCode {
+        if shortcutMatches(event,
+                           modifier: Defaults[.undoCommitShortcutModifier],
+                           key: Defaults[.undoCommitShortcutKey]) {
             return undoLastCommit()
         }
         return nil
+    }
+
+    /// 清空编码串：直接丢弃当前未上屏的编码并清理合成态（不走 Esc 按键路径）。
+    /// 无编码时不拦截，保留 Ctrl+C 的复制语义交给应用处理。
+    private func clearCodeHotkeyHandler(event: NSEvent) -> Bool? {
+        if shortcutMatches(event,
+                           modifier: Defaults[.clearCodeShortcutModifier],
+                           key: Defaults[.clearCodeShortcutKey]) {
+            guard !self._originalString.isEmpty else { return nil }
+            fireLog("hotkey: clear code: \(self._originalString)")
+            self.clean()
+            return true
+        }
+        return nil
+    }
+
+    /// 快捷键匹配：一个修饰键 + 单个按键（与首选项面板的约定一致）
+    private func shortcutMatches(_ event: NSEvent,
+                                 modifier: ModifierKey,
+                                 key: String) -> Bool {
+        let required = FireInputController.modifierFlag(for: modifier)
+        guard FireInputController.modifiersMatch(event.modifierFlags, required: required) else { return false }
+        guard let keyCode = FireInputController.keyCode(for: key.lowercased()) else { return false }
+        return event.keyCode == keyCode
     }
 
     private static let shortcutModifierMask: NSEvent.ModifierFlags = [
@@ -1272,15 +1313,23 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                     fireLog("[FireInputController] insertCandidate should append whitespace: \(newText)")
                 }
             }
-            let replaceRange = replacementRange()
             let selectedRange = client().selectedRange()
+            // 上屏前先定插入位置：合成区(replaceRange)有效时其 location 即插入位置；
+            // 否则无合成区，光标位置即插入位置。两者都不可用时记 nil，撤销时按光标校验
             var insertionLocation: Int?
-            if replaceRange.location != NSNotFound {
-                if replaceRange.length == 0 {
-                    insertionLocation = replaceRange.location
-                }
+            let replaceRange = replacementRange()
+            let markedRange = client().markedRange()
+            if replaceRange.location != NSNotFound && replaceRange.location < 1_000_000 {
+                insertionLocation = replaceRange.location
             } else if selectedRange.location != NSNotFound && selectedRange.location < 1_000_000 {
                 insertionLocation = selectedRange.location
+                // 某些 App（如 TextEdit）把合成区文字计入文档长度、光标报在组字区之后
+                //（实测 wob 合成态 sel={3,0}，上屏后光标回落到 1）：
+                // 光标恰在组字区末尾时，真实插入点 = 光标 − 组字区长度
+                if markedRange.location != NSNotFound, markedRange.length > 0,
+                   selectedRange.location == markedRange.location + markedRange.length {
+                    insertionLocation = markedRange.location
+                }
             }
             let value = NSAttributedString(string: newText)
             client()?.insertText(value, replacementRange: replacementRange())
@@ -1288,10 +1337,9 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             _lastInputIsNumber = newText.last != nil && Int(String(newText.last!)) != nil
             _lastPunctuationKeyCode = nil
             _lastCommittedText = newText
-            if let insertionLocation = insertionLocation {
-                _lastCommittedRange = NSRange(location: insertionLocation, length: newText.count)
-            } else {
-                _lastCommittedRange = nil
+            _committedRecords.append(CommittedRecord(text: newText, location: insertionLocation))
+            if _committedRecords.count > Self.maxUndoDepth {
+                _committedRecords.removeFirst(_committedRecords.count - Self.maxUndoDepth)
             }
         }
         clean()
@@ -1424,22 +1472,128 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         CandidatesWindow.shared.close()
     }
 
-    private func undoLastCommit() -> Bool {
-        guard _originalString.isEmpty else { return false }
-        guard !_lastCommittedText.isEmpty else { return false }
-        let selectedRange = client().selectedRange()
-        guard selectedRange.location != NSNotFound && selectedRange.location < 1_000_000 else { return false }
-        guard let range = _lastCommittedRange else { return false }
-        guard selectedRange.location == range.location + range.length else { return false }
-        let previousText = client().attributedSubstring(from: range)?.string ?? ""
-        guard previousText == _lastCommittedText else { return false }
+    /// 删除指定区段的文字，逐级兜底：
+    ///   1. 空串替换区间（多数客户端支持，立即生效）；
+    ///   2. 非空替换：把"区间之后到光标"的内容替换进区间（部分客户端如
+    ///      TextEdit 忽略空串替换，但非空替换普遍支持）；
+    ///   3. 私有事件源投递删除键：事件经 TSM 路由后照常到达应用完成删除
+    ///      （需辅助功能权限；非 ESC，不会触发应用的 Esc 行为）。
+    /// 删除可能异步生效（尤其兜底3走事件队列）：兜底1/2轮询回读确认，
+    /// 兜底3投递成功即确认；全部失败返回 false，调用方保留撤销栈不误报成功。
+    @discardableResult
+    private func deleteRange(_ range: NSRange) -> Bool {
         client()?.insertText(NSAttributedString(string: ""), replacementRange: range)
-        _lastCommittedText = ""
-        _lastCommittedRange = nil
-        // 撤销的是整句上屏的文字时，同步弹出对应的 n-gram 留存段
+        if isRangeDeleted(range) { return true }
+        // 兜底2：非空替换（undoLastCommit 保证目标区段整体在光标之前）
+        let sel = client().selectedRange()
+        if sel.location != NSNotFound, sel.location >= range.location + range.length {
+            let after = client().attributedSubstring(
+                from: NSRange(location: range.location + range.length,
+                             length: sel.location - range.location - range.length))?.string ?? ""
+            if !after.isEmpty {
+                client()?.insertText(NSAttributedString(string: after), replacementRange: range)
+                if isRangeDeleted(range) { return true }
+            }
+        }
+        // 兜底3：删除键（光标须恰在目标末尾，逐码元退格）。
+        // 投递成功即视为删除生效：删除经事件队列异步到达应用，
+        // 立即回读 attributedSubstring 可能拿到删除前的缓存而误判失败；
+        // 光标守卫已确认状态，此处信任标准删除语义，避免撤销栈卡死。
+        guard AXIsProcessTrusted() else { return false }
+        let selNow = client().selectedRange()
+        guard selNow.length == 0, selNow.location == range.location + range.length else { return false }
+        let source = CGEventSource(stateID: .privateState)
+        for _ in 0..<range.length {
+            guard let down = CGEvent(keyboardEventSource: source, virtualKey: UInt16(kVK_Delete), keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: UInt16(kVK_Delete), keyDown: false) else { break }
+            down.post(tap: .cgSessionEventTap)
+            up.post(tap: .cgSessionEventTap)
+        }
+        return true
+    }
+
+    /// 轮询回读确认区段已空（删除可能异步生效，最长约 250ms）。
+    /// 指数退避：同步生效的客户端首读（0ms）即命中；异步生效的从 1ms 起步探测，
+    /// 把常见路径的固定 25ms 步进等待压到毫秒级，总确认窗口与语义不变。
+    private func isRangeDeleted(_ range: NSRange) -> Bool {
+        var delay: UInt32 = 1_000 // 首次退避 1ms
+        var elapsed: UInt32 = 0
+        while elapsed < 250_000 {
+            if (client().attributedSubstring(from: range)?.string ?? "").isEmpty { return true }
+            usleep(delay)
+            elapsed += delay
+            delay = min(delay * 2, 32_000)
+        }
+        return (client().attributedSubstring(from: range)?.string ?? "").isEmpty
+    }
+
+    /// 清空上屏撤销记录（切换输入框/客户端时调用），
+    /// 避免在新输入框里误撤销上一个输入框中上屏的文字
+    func clearCommitUndoRecords() {
+        _committedRecords.removeAll()
+    }
+
+    /// 撤消上屏：回退最近一次上屏的文字（Ctrl+U 默认）。
+    /// 定位策略：
+    ///   1. 记录里有上屏时的插入位置：校验该区段文字与记录一致后删除，
+    ///      并要求光标仍在该文字末尾，避免误删用户后续编辑的内容；
+    ///   2. 记录里没有位置（上屏时应用未报告位置）：按光标位置回推文字长度，
+    ///      校验光标前文字与记录一致后删除。
+    /// 校验不通过（用户已移动光标或改动文字）时不强行撤销，放行给应用处理。
+    private func undoLastCommit() -> Bool {
+        guard _originalString.isEmpty, _combineCount == nil, _pendingDeleteCandidate == nil else { return false }
+        guard let record = _committedRecords.last else { return false }
+        let text = record.text
+        guard !text.isEmpty else {
+            _committedRecords.removeLast()
+            return false
+        }
+        let selectedRange = client().selectedRange()
+        guard selectedRange.location != NSNotFound && selectedRange.location < 1_000_000 else {
+            return false
+        }
+
+        var range: NSRange
+        if let location = record.location {
+            // 有记录位置：先按记录校验；失败再尝试光标回退
+            //（某些 App 上屏前后 selectedRange 基准不一致，记录位置可能与实际错位）
+            if selectedRange.location == location + record.utf16Length {
+                range = NSRange(location: location, length: record.utf16Length)
+            } else if selectedRange.length == 0,
+                    selectedRange.location >= record.utf16Length {
+                let backRange = NSRange(location: selectedRange.location - record.utf16Length, length: record.utf16Length)
+                if client().attributedSubstring(from: backRange)?.string == text {
+                    range = backRange
+                } else {
+                    return false
+                }
+            } else {
+                return false
+            }
+        } else {
+            // 无记录位置：从光标回推。光标前若已有选区则不撤销，避免覆盖用户选择
+            guard selectedRange.length == 0, selectedRange.location >= record.utf16Length else {
+                return false
+            }
+            range = NSRange(location: selectedRange.location - record.utf16Length, length: record.utf16Length)
+        }
+        // 删除前校验区段文字确实是当初上屏的内容，防止误删
+        let found = client().attributedSubstring(from: range)?.string ?? ""
+        guard found == text else {
+            return false
+        }
+
+        // 执行删除（deleteRange 三级兜底）。
+        // 删除失败则保留撤销栈，放行给应用（不误报成功）
+        guard deleteRange(range) else {
+            return false
+        }
+        _committedRecords.removeLast()
+        _lastCommittedText = _committedRecords.last?.text ?? ""
+                // 撤销的是整句上屏的文字时，同步弹出对应的 n-gram 留存段
         if Defaults[.enableSentenceMode],
            let last = _sentenceSession.contextSegments.last,
-           last == previousText {
+           last == text {
             _sentenceSession.contextSegments.removeLast()
         }
         return true

@@ -187,6 +187,15 @@ extension Defaults.Keys {
         "undoCommitShortcutKey",
         default: "u"
     )
+    // 清空编码串：直接丢弃当前未上屏的编码（不模拟ESC，避免与应用的ESC行为纠缠）
+    static let clearCodeShortcutModifier = Key<ModifierKey>(
+        "clearCodeShortcutModifier",
+        default: ModifierKey.control
+    )
+    static let clearCodeShortcutKey = Key<String>(
+        "clearCodeShortcutKey",
+        default: "l"
+    )
 
     static let wbTablePath = Key<String>(
         "wbTableURL",

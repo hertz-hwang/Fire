@@ -102,6 +102,11 @@ struct CandidateView: View {
             return Text(candidate.label).foregroundColor(baseColor)
         }
         let segments = sentenceDiff(base: base, candidate: candidate.label)
+        // 与首选无任何公共字符时 diff 只剩单个变更块，也要按 diff 色整体着色；
+        // 仅当没有非 equal 片段（候选文字全部命中首选）时才退化为单色
+        guard segments.contains(where: { $0.kind != .equal }) else {
+            return Text(candidate.label).foregroundColor(baseColor)
+        }
         let runs = segments.map { segment -> Text in
             Text(segment.text).foregroundColor(
                 segment.kind == .equal
@@ -109,7 +114,7 @@ struct CandidateView: View {
                     : segment.kind.color(colorScheme: colorScheme)
             )
         }
-        guard runs.count > 1, let first = runs.first else {
+        guard let first = runs.first else {
             return Text(candidate.label).foregroundColor(baseColor)
         }
         return runs.dropFirst().reduce(first) { $0 + $1 }

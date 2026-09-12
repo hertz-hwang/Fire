@@ -48,6 +48,15 @@ extension FireInputController {
 
         // 切换输入框时清空已提交文本，避免跨输入框误判是否需要插入空格
         _lastCommittedText = ""
+        // 仅当客户端身份变化时才清空上屏撤销记录：
+        // 同一输入框重复 activate（窗口重获焦点、系统重复通知等）不得清空，
+        // 否则上屏后一切焦点活动都会把撤销栈抹掉，导致撤消上屏失效
+        if let client = client() {
+            if let prev = activateServerClient, prev !== client {
+                clearCommitUndoRecords()
+            }
+            activateServerClient = client
+        }
 
         // 这个保存动作之所以不在 deactivateServer 中做，主要是因为 activateServer 和 deactivateServer 的调用顺序不固定
         // 而 inputMode 是全局的，如果是 activateServer 先调用，则会写入 inputMode

@@ -14,6 +14,8 @@ struct HotkeyPane: View {
     @Default(.openPreferencesShortcutKey) private var shortcutKey
     @Default(.undoCommitShortcutModifier) private var undoShortcutModifier
     @Default(.undoCommitShortcutKey) private var undoShortcutKey
+    @Default(.clearCodeShortcutModifier) private var clearCodeShortcutModifier
+    @Default(.clearCodeShortcutKey) private var clearCodeShortcutKey
 
     private func normalizedKey(_ value: String, fallback: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -67,6 +69,28 @@ struct HotkeyPane: View {
                         .frame(width: 80)
                     }
                     Text("仅支持一个修饰键 + 单个按键")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("清空编码串")
+                    HStack(spacing: 12) {
+                        Picker("修饰键", selection: $clearCodeShortcutModifier) {
+                            Text("control").tag(ModifierKey.control)
+                            Text("shift").tag(ModifierKey.shift)
+                            Text("option").tag(ModifierKey.option)
+                            Text("command").tag(ModifierKey.command)
+                            Text("fn").tag(ModifierKey.function)
+                        }
+                        .frame(width: 160)
+                        Text("+")
+                        TextField("按键", text: Binding<String>(
+                            get: { clearCodeShortcutKey },
+                            set: { clearCodeShortcutKey = normalizedKey($0, fallback: clearCodeShortcutKey) }
+                        ))
+                        .frame(width: 80)
+                    }
+                    Text("直接丢弃当前未上屏的编码（非ESC）；无编码时该快捷键交回应用处理")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
