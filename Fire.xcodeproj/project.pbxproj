@@ -33,6 +33,7 @@
 		67C9A0102AB53E83000B5281 /* types.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A0082AB53E83000B5281 /* types.swift */; };
 		67C9A0132AB53EB0000B5281 /* build.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A0122AB53EB0000B5281 /* build.swift */; };
 		AA5E000E000000000SCHEM0E /* SchemaCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000D000000000SCHEM0D /* SchemaCatalog.swift */; };
+		AA5E000A000000000SENT10A /* SentenceDiff.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0009000000000SENT109 /* SentenceDiff.swift */; };
 		B69DA4B49CE03349FE520100 /* CharDivTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8620ABF31D9A811185DDB4F8 /* CharDivTable.swift */; };
 		67C9A0312AB53ED3000B5281 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 67C9A0152AB53ED2000B5281 /* InfoPlist.strings */; };
 		67C9A0322AB53ED3000B5281 /* CandidatesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C9A0182AB53ED2000B5281 /* CandidatesView.swift */; };
@@ -146,6 +147,7 @@
 		AA5E0004000000000SENT104 /* SentenceEngine.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceEngine.swift; sourceTree = "<group>"; };
 		AA5E0008000000000SENT108 /* SentenceSupplement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentenceSupplement.swift; sourceTree = "<group>"; };
 		AA5E0005000000000SENT105 /* SentenceTypes.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceTypes.swift; sourceTree = "<group>"; };
+		AA5E0009000000000SENT109 /* SentenceDiff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentenceDiff.swift; sourceTree = "<group>"; };
 		AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */ = {isa = PBXFileReference; lastKnownFileType = file; path = "sentence-ngram-mobile.bin"; sourceTree = "<group>"; };
 		AA5E000B000000000SCHEM0B /* schemas */ = {isa = PBXFileReference; lastKnownFileType = folder; path = schemas; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -359,6 +361,7 @@
 				AA5E0003000000000SENT103 /* SentenceDecoder.swift */,
 				AA5E0004000000000SENT104 /* SentenceEngine.swift */,
 				AA5E0008000000000SENT108 /* SentenceSupplement.swift */,
+				AA5E0009000000000SENT109 /* SentenceDiff.swift */,
 			);
 			path = Sentence;
 			sourceTree = "<group>";
@@ -510,6 +513,7 @@
 				67C9A0402AB53ED3000B5281 /* ApplicationPane.swift in Sources */,
 				67C9A0132AB53EB0000B5281 /* build.swift in Sources */,
 				AA5E000E000000000SCHEM0E /* SchemaCatalog.swift in Sources */,
+				AA5E000A000000000SENT10A /* SentenceDiff.swift in Sources */,
 				B69DA4B49CE03349FE520100 /* CharDivTable.swift in Sources */,
 				67C9A0422AB53ED3000B5281 /* ThesaurusPane.swift in Sources */,
 				67C9A0002AB53E62000B5281 /* ModifierKeyUpChecker.swift in Sources */,

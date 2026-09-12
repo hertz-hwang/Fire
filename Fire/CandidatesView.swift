@@ -31,6 +31,8 @@ struct CandidateView: View {
     var origin: String
     var selected: Bool = false
     var indexVisible = true
+    /// 整句模式：与首选文字的差异着色基准（首选自身与常规候选为 nil）
+    var diffBase: String? = nil
 
     @Default(.themeConfig) private var themeConfig
     @Default(.wubiCodeTip) private var wubiCodeTip
@@ -56,8 +58,7 @@ struct CandidateView: View {
                 Text("\(index + 1).")
                     .foregroundColor(Color(indexColor))
             }
-            Text(candidate.label)
-                .foregroundColor(Color(textColor))
+            candidateText(baseColor: Color(textColor))
             if wubiCodeTip || origin.first == "`" {
                 Text(getShownCode(candidate: candidate, origin: origin))
                     .foregroundColor(Color(codeColor))
@@ -93,6 +94,26 @@ struct CandidateView: View {
             }
         )
     }
+
+    /// 整句候选与首选的差异着色（git diff 风格：等长替换橙、净删除红、净增绿），
+    /// 无基准或全同时退化为单色 Text。Text 拼接保持整词为一个排版单元
+    private func candidateText(baseColor: Color) -> Text {
+        guard let base = diffBase, !base.isEmpty, base != candidate.label else {
+            return Text(candidate.label).foregroundColor(baseColor)
+        }
+        let segments = sentenceDiff(base: base, candidate: candidate.label)
+        let runs = segments.map { segment -> Text in
+            Text(segment.text).foregroundColor(
+                segment.kind == .equal
+                    ? baseColor
+                    : segment.kind.color(colorScheme: colorScheme)
+            )
+        }
+        guard runs.count > 1, let first = runs.first else {
+            return Text(candidate.label).foregroundColor(baseColor)
+        }
+        return runs.dropFirst().reduce(first) { $0 + $1 }
+    }
 }
 
 struct CandidatesView: View {
@@ -113,13 +134,18 @@ struct CandidatesView: View {
     @Environment(\.colorScheme) var colorScheme
 
     var _candidatesView: some View {
-        ForEach(Array(candidates.enumerated()), id: \.offset) { (index, candidate) -> CandidateView in
+        // 整句模式（列表中出现整句候选即视为）非首选候选以首位文字为差异基准
+        let diffBase = candidates.contains { $0.type == .sentence }
+            ? candidates.first?.label
+            : nil
+        return ForEach(Array(candidates.enumerated()), id: \.offset) { (index, candidate) -> CandidateView in
             CandidateView(
                 candidate: candidate,
                 index: index,
                 origin: origin,
                 selected: index == highlightIndex,
-                indexVisible: candidates.count > 1
+                indexVisible: candidates.count > 1,
+                diffBase: index > 0 ? diffBase : nil
             )
         }
     }
