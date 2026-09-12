@@ -676,6 +676,20 @@ class FireInputController: IMKInputController {
             if _sentenceActive && _originalString.count >= SentenceConfig.maxRawLength {
                 return nil
             }
+            // 常规码表（非整句）：已达最大码长且候选为空时，下一码丢弃旧串，
+            // 本码成为新一串的首位编码（如 `dkku` 无候选，再敲 `v` 组字区只剩 `v`）。
+            // 空码顶字/空码直接上屏有自己的清屏规则，反查与临时英文不参与。
+            if !Defaults[.enableSentenceMode],
+               !_sentenceActive,
+               _originalString.first != "`",
+               _originalString.first != DictManager.shared.tempEnTriggerPunctuation,
+               Defaults[.commitMode] != .emptyCodePush,
+               Defaults[.commitMode] != .emptyCodeDirect,
+               _originalString.count >= Defaults[.maxCodeLength],
+               _candidates.isEmpty || _candidates.first?.type == .placeholder {
+                _originalString = string
+                return true
+            }
             _originalString += string
 
             // 整句自动上屏：先空码型，再概率型。
