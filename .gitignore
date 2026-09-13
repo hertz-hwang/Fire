@@ -126,3 +126,7 @@ iOSInjectionProject/
 .plan/
 tools/ngram/fast_train
 tools/ngram/corpus/
+
+# 整句 n-gram 模型不入版本库：公开 fork 被 GitHub 禁止上传 LFS 对象，
+# 本地重训产出放回原路径即可，分发走 GitHub Release（tools/publish_model_release.sh）
+Fire/Resources/sentence-ngram-mobile.bin
