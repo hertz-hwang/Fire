@@ -50,6 +50,8 @@ class FireInputController: IMKInputController {
     private var _sentenceHighlightIndex: Int = 0
     // 整句解码总候选数（分页用；_candidates 只装当前页）
     private var _sentenceTotalCount = 0
+    // 候选总页数（页码指示 "n/m" 用；0/1 表示单页不显示）
+    private var _pageCount = 0
     internal var inputMode: InputMode {
         get { Fire.shared.inputMode }
         set(value) { Fire.shared.inputMode = value }
@@ -370,9 +372,9 @@ class FireInputController: IMKInputController {
             label: "确认删除「\(target.text)」? Enter键确认， Esc键取消"
         )
         CandidatesWindow.shared.setCandidates(
-            (list: [tip], hasPrev: false, hasNext: false),
+            (list: [tip], hasPrev: false, hasNext: false, page: 1, pageCount: 0),
             originalString: _originalString,
-            topLeft: getOriginPoint()
+            caretRect: getCaretRect()
         )
     }
 
@@ -430,9 +432,9 @@ class FireInputController: IMKInputController {
             label: "【\(text)】，←键增字， →键减字，Enter键确认， Esc键取消"
         )
         CandidatesWindow.shared.setCandidates(
-            (list: [tip], hasPrev: false, hasNext: false),
+            (list: [tip], hasPrev: false, hasNext: false, page: 1, pageCount: 0),
             originalString: codeStr,
-            topLeft: getOriginPoint()
+            caretRect: getCaretRect()
         )
     }
 
@@ -737,7 +739,11 @@ class FireInputController: IMKInputController {
             // 整句自动上屏：先空码型，再概率型。
             // 保护用户自定义短语：当前编码仍是某个用户码的前缀（如还没打完
             // `date`）时不自动上屏，等编码完整命中后置顶让用户选择。
-            if _sentenceActive {
+            // 门控不能只看 _sentenceActive：本键使编码变为空码时，didSet 里先跑的
+            // updateCandidates 会因整句解码为空回落普通词候选，把 _sentenceActive
+            // 置 false（如琉璃 fl+o → flo），空码上屏会永远等不到这一键——
+            // 只要整句分支仍拥有该组字区，就照常喂键。
+            if _sentenceActive || sentenceBranchAllowed() {
                 let raw = _originalString
                 if DictManager.shared.hasUserDictPrefix(matching: raw) {
                     SentenceEngine.shared.evidenceInvalidated(_sentenceSession)
@@ -1074,12 +1080,16 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             if pyQuery.isEmpty {
                 _candidates = []
                 _hasNext = false
+                _pageCount = 0
                 _sentenceActive = false
                 return
             }
             let (candidates, hasNext) = DictManager.shared.getReverseLookupCandidates(query: pyQuery, page: curPage)
             _candidates = candidates
             _hasNext = hasNext
+            _pageCount = resolvePageCount(hasNext: hasNext) {
+                DictManager.shared.getReverseLookupCandidatesCount(query: pyQuery)
+            }
             _sentenceActive = false
             return
         }
@@ -1116,6 +1126,9 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                 }
                 _candidates = merged
                 _hasNext = suffixHasNext
+                _pageCount = resolvePageCount(hasNext: suffixHasNext) {
+                    DictManager.shared.getCandidatesCount(query: suffix)
+                }
                 _sentenceActive = false
                 return
             }
@@ -1176,6 +1189,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                     }
                     _candidates = list
                     _hasNext = curPage < pageCount
+                    _pageCount = pageCount
                     if _sentenceHighlightIndex >= _candidates.count {
                         _sentenceHighlightIndex = max(0, _candidates.count - 1)
                     }
@@ -1186,6 +1200,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                 if SentenceEngine.containsSelector(_originalString) {
                     _candidates = []
                     _hasNext = false
+                    _pageCount = 0
                     _sentenceActive = true
                     _sentenceHighlightIndex = 0
                     _sentenceTotalCount = 0
@@ -1199,6 +1214,20 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         let (candidates, hasNext) = Fire.shared.getCandidates(origin: self._originalString, page: curPage)
         _candidates = candidates
         _hasNext = hasNext
+        _pageCount = resolvePageCount(hasNext: hasNext) {
+            DictManager.shared.getCandidatesCount(query: self._originalString)
+        }
+    }
+
+    /// 页码指示的总页数：单页菜单不查总数（最常见路径零开销）；
+    /// 多页时才查一次候选总数。总数因过滤可能略偏小时以当前页码兜底，
+    /// 保证指示器不会出现 "n > m"。
+    private func resolvePageCount(hasNext: Bool, totalProvider: () -> Int) -> Int {
+        if !hasNext && curPage <= 1 { return 1 }
+        let pageSize = max(1, Defaults[.candidateCount])
+        let total = totalProvider()
+        guard total > 0 else { return 1 }
+        return max(curPage, (total + pageSize - 1) / pageSize)
     }
 
     /// 整句候选分支是否可用：开关 + 引擎可用 + 不落入各特例早退分支
@@ -1237,11 +1266,12 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             CandidatesWindow.shared.close()
             return
         }
-        let candidatesData = (list: _candidates, hasPrev: curPage > 1, hasNext: _hasNext)
+        let candidatesData = (list: _candidates, hasPrev: curPage > 1, hasNext: _hasNext,
+                              page: curPage, pageCount: _pageCount)
         CandidatesWindow.shared.setCandidates(
             candidatesData,
             originalString: _originalString,
-            topLeft: getOriginPoint(),
+            caretRect: getCaretRect(),
             highlightIndex: _sentenceActive ? _sentenceHighlightIndex : 0
         )
         // 候选词更新后重新 mark，确保组字区跟随焦点候选：
@@ -1465,13 +1495,33 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         return true
     }
 
-    // 获取当前输入的光标位置
-    func getOriginPoint() -> NSPoint {
-        let xd: CGFloat = 0
-        let yd: CGFloat = 4
+    // 获取光标行矩形（候选窗锚点）：组字串非空时取组字串末字符的行矩形——
+    // 行内组字时组字串很长，index 0 是组字串开头而非光标，候选窗必须锚在光标（组字串末尾）；
+    // 面板模式组字区只有单个空格，末字符即光标处。应用给不出时退化为鼠标位置处的一行
+    func getCaretRect() -> NSRect {
         var rect = NSRect()
-        client()?.attributes(forCharacterIndex: 0, lineHeightRectangle: &rect)
-        return NSPoint(x: rect.minX + xd, y: rect.minY - yd)
+        var index = 0
+        let marked = client()?.markedRange() ?? NSMakeRange(NSNotFound, 0)
+        if marked.location != NSNotFound, marked.length > 0 {
+            index = marked.length - 1
+        }
+        client()?.attributes(forCharacterIndex: index, lineHeightRectangle: &rect)
+        if rect.equalTo(NSRect.zero) && index != 0 {
+            // 个别客户端对末字符给不出矩形时退回首字符
+            client()?.attributes(forCharacterIndex: 0, lineHeightRectangle: &rect)
+        }
+        if rect.equalTo(NSRect.zero) {
+            let mouse = NSEvent.mouseLocation
+            return NSRect(x: mouse.x, y: mouse.y, width: 0, height: 16)
+        }
+        // 光标紧跟在末字符之后：锚点取该字符右缘，宽度归零（纯锚点）
+        return NSRect(x: rect.maxX, y: rect.minY, width: 0, height: rect.height)
+    }
+
+    // 获取当前输入的光标位置（候选窗左上角钉位点，供提示窗等沿用）
+    func getOriginPoint() -> NSPoint {
+        let rect = getCaretRect()
+        return NSPoint(x: rect.minX, y: rect.minY - 4)
     }
 
     func clean() {
@@ -1484,6 +1534,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         _sentenceActive = false
         _sentenceHighlightIndex = 0
         _sentenceTotalCount = 0
+        _pageCount = 0
         // 整句会话整体重置（空格/回车/Esc/上屏都走到这里）
         SentenceEngine.shared.resetSession(_sentenceSession)
         CandidatesWindow.shared.close()

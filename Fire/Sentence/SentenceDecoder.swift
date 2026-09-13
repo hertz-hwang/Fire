@@ -538,10 +538,14 @@ final class SentenceDecoder {
         }
 
         var evidence = SentenceEarlyEvidence()
-        evidence.confidenceTruncated = completedBucket.truncated
-        if includeEarlyCommit && !completedBucket.truncated {
+        // 证据始终构建（pool 被截断时只打标记不缺席）：
+        // 正常规则把 confidenceTruncated 当作证据作废，行为不变；
+        // 临近上限的兜底上屏则要在截断证据上照常出字（长编码歧义段恰是
+        // 截断高发区，若截断即无证据，兜底永远等不到材料）。
+        if includeEarlyCommit {
             evidence = buildEarlyCommitEvidence(raw: raw, buckets: &buckets,
-                                                visible: result)
+                                                visible: result,
+                                                poolTruncated: completedBucket.truncated)
         }
         return SentenceDecodeResult(candidates: result, evidence: evidence)
     }
@@ -550,11 +554,13 @@ final class SentenceDecoder {
 
     private func buildEarlyCommitEvidence(
         raw: [UInt8], buckets: inout [SentenceBucket?],
-        visible: [SentenceCompleted]
+        visible: [SentenceCompleted],
+        poolTruncated: Bool
     ) -> SentenceEarlyEvidence {
         // pool：可见整句候选 + 不完整码尾的中间态
         var pool: [SentenceCompleted] = visible.filter { !$0.text.isEmpty }
         var mergedIncompleteTail = false
+        var truncated = poolTruncated
 
         let maximumTailLength = Swift.min(lexicon.maxCodeLength - 1, raw.count - 1)
         if maximumTailLength >= 1 {
@@ -573,9 +579,7 @@ final class SentenceDecoder {
                 if added {
                     mergedIncompleteTail = true
                     if partial.truncated {
-                        var truncated = SentenceEarlyEvidence()
-                        truncated.confidenceTruncated = true
-                        return truncated
+                        truncated = true
                     }
                 }
             }
@@ -630,7 +634,7 @@ final class SentenceDecoder {
             neutralIncompleteTail: visible.isEmpty && mergedIncompleteTail,
             mergedIncompleteTail: mergedIncompleteTail,
             neutralLowConfidence: hasLowConfidenceCompletedGeneration(visible),
-            confidenceTruncated: false)
+            confidenceTruncated: truncated)
     }
 
     /// 每个 (文字前缀, raw 边界) 的后验占比；boundary 质量每候选每边界计一次

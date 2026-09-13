@@ -81,10 +81,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !commandHandler() {
             return
         }
+        // 候选框渲染预览（调试）：离屏渲染各状态 PNG 后退出，不初始化输入法
+        if CommandLine.arguments.contains("--preview-candidates") {
+            CandidatesPreviewRenderer.run()
+            return
+        }
         // 拼音方案锁定项归一（覆盖老版本升级残留的自由配置）
         enforcePinyinInputModeDefaults()
         // 老版本平铺在 Resources 根的码表路径迁移到 Resources/schemas
         SchemaCatalog.migrateLegacyTablePaths()
+        // 内置默认主题升级
+        migrateDefaultThemeIfNeeded()
         // 无配套整句码表的方案（五笔86/98 等）：整句强制关闭
         enforceTableSentenceSupport()
         if !hasDict() {

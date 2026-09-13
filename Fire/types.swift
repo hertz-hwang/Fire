@@ -37,6 +37,13 @@ enum AppInputModeTipShowTime: Int, Decodable, Encodable, Defaults.Serializable {
     case none // 不显示
 }
 
+// 候选框主题深浅模式：手动固定深/浅色，或跟随系统外观
+enum ThemeAppearanceMode: Int, Codable, Defaults.Serializable {
+    case followSystem // 跟随系统
+    case light // 浅色主题
+    case dark // 深色主题
+}
+
 enum ModifierKey: String, Codable, Defaults.Serializable {
   case shift
   case leftShift
@@ -98,7 +105,7 @@ extension Defaults.Keys {
     static let zKeyRepeat = Key<Bool>("zKeyRepeat", default: true)
     static let candidatesDirection = Key<CandidatesDirection>(
         "candidatesDirection",
-        default: CandidatesDirection.horizontal
+        default: CandidatesDirection.vertical
     )
     static let showCodeInWindow = Key<Bool>("showCodeInWindow", default: true)
     static let codeInWindowMode = Key<CodeInWindowMode>("codeInWindowMode", default: .inputCode)
@@ -149,6 +156,11 @@ extension Defaults.Keys {
     // 主题
     static let themeConfig = Key<ThemeConfig>("themeConfig", default: defaultThemeConfig)
     static let importedThemeConfig = Key<ThemeConfig?>("importedThemeConfig", default: nil)
+    // 深浅主题模式：手动固定或跟随系统
+    static let themeAppearanceMode = Key<ThemeAppearanceMode>(
+        "themeAppearanceMode",
+        default: ThemeAppearanceMode.followSystem
+    )
     static let hideCandidatesWindow = Key<Bool>("hideCandidatesWindow", default: false)
 
     // 应用输入配置

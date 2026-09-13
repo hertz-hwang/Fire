@@ -230,13 +230,19 @@ final class SentenceEngine {
         let result = session.decoder.decode(raw, includeEarlyCommit: true,
                                              context: session.contextText)
         let evidence = result.evidence
-        if evidence.confidenceTruncated {
+        // 临近组字区上限：调低前缀置信阈值兜底出字（防止触顶拒键）。
+        // beam 截断只让证据质量降级，兜底时照常使用——长编码歧义段恰是
+        // 截断高发区，若截断即作废，兜底永远等不到材料。
+        let nearCap = raw.count >= SentenceConfig.autoCommitMaxRawLength
+            - SentenceConfig.nearCapCommitGenerations
+        if evidence.confidenceTruncated && !nearCap {
             session.resetEvidence()
             return nil
         }
 
         if session.lastSeenRaw == raw {
-            return tryCommitMaturePrefix(session: session, raw: raw)
+            return commitMaturePrefixOrNearCapFallback(session: session, raw: raw,
+                                                       result: result)
         }
 
         // 生成代必须是"上次证据编码 + 一键"，否则历史作废
@@ -248,6 +254,10 @@ final class SentenceEngine {
         }
         session.lastSeenRaw = raw
 
+        let minimumShare = nearCap
+            ? SentenceConfig.nearCapMinimumShare
+            : SentenceConfig.earlyCommitMinimumShare
+
         // 榜首带 supplement 奖励时，只接受它的文字前缀（虎整句 accepted_top：
         // 加权新词保护期内不被其它分歧前缀提前截走）
         var acceptedTop: String? = nil
@@ -257,8 +267,12 @@ final class SentenceEngine {
         let mergedIncompleteTail = evidence.mergedIncompleteTail
         var qualifying: [String: SentencePrefixEvidence] = [:]
         for prefix in evidence.prefixes {
-            if prefix.text.isEmpty || !prefix.boundaryClosed { continue }
-            if prefix.share < SentenceConfig.earlyCommitMinimumShare { continue }
+            if prefix.text.isEmpty { continue }
+            // 兜底时边界闭合门槛同步降到 nearCapMinimumShare
+            let boundaryClosed = prefix.boundaryClosed
+                || (nearCap && prefix.boundaryShare >= SentenceConfig.nearCapMinimumShare)
+            guard boundaryClosed else { continue }
+            if prefix.share < minimumShare { continue }
             if prefix.rawLength <= 0 || prefix.rawLength >= raw.count { continue }
             if prefix.textCharCount <= 0 { continue }
             if !mergedIncompleteTail && !prefixBelongsToVisible(prefix, result.candidates) {
@@ -275,7 +289,8 @@ final class SentenceEngine {
         if retainWithoutCounting {
             // 中性间隔：最多 3 代不计证据地保住旧 tracker
             retainTrackersWithoutCounting(session: session, prefixes: evidence.prefixes)
-            return tryCommitMaturePrefix(session: session, raw: raw)
+            return commitMaturePrefixOrNearCapFallback(session: session, raw: raw,
+                                                       result: result)
         }
 
         var nextTrackers: [String: SentenceTracker] = [:]
@@ -294,16 +309,66 @@ final class SentenceEngine {
             nextTrackers[key] = tracker
         }
         session.trackers = nextTrackers
-        return tryCommitMaturePrefix(session: session, raw: raw)
+        return commitMaturePrefixOrNearCapFallback(session: session, raw: raw,
+                                                   result: result)
+    }
+
+    /// 成熟前缀上屏，失败时尝试临近上限的最后一档兜底
+    private func commitMaturePrefixOrNearCapFallback(session: SentenceSession,
+                                                     raw: String,
+                                                     result: SentenceDecodeResult) -> SentenceAutoCommit? {
+        if let commit = tryCommitMaturePrefix(session: session, raw: raw) {
+            return commit
+        }
+        return tryNearCapLastResort(session: session, raw: raw, result: result)
+    }
+
+    /// 临近上限的最后一档兜底：连 nearCapMinimumShare 占比的闭合前缀都没有
+    /// （后验持平）时，按榜首候选自身的分段边界强制出字到"留足保留键"的
+    /// 最长边界——触顶拒键（键漏给系统）比出字更不可接受。
+    private func tryNearCapLastResort(session: SentenceSession,
+                                       raw: String,
+                                       result: SentenceDecodeResult) -> SentenceAutoCommit? {
+        let retain = SentenceConfig.earlyCommitRetainedRawLength
+        guard raw.count >= SentenceConfig.autoCommitMaxRawLength
+            - SentenceConfig.nearCapCommitGenerations,
+            raw.count - retain >= 1,
+            let top = result.candidates.first else { return nil }
+
+        var boundaryNode: SentenceState? = top.path
+        while let node = boundaryNode, node.rawLength > 0,
+              node.rawLength > raw.count - retain {
+            boundaryNode = node.previous
+        }
+        guard let node = boundaryNode, node.rawLength > 0, !node.text.isEmpty else {
+            return nil
+        }
+
+        let commit = node.text
+        session.committedText = committedTextByAppending(session.committedText, commit)
+        session.committedRawLength += node.rawLength
+        session.recordContext(commit)
+        session.lastAutoCommitRawLength = node.rawLength
+        session.continuationAfterAutoCommit = false
+        session.resetEvidence()
+        session.emptyCodePending = nil
+
+        return SentenceAutoCommit(text: commit, retainedRaw: String(raw.dropFirst(node.rawLength)))
     }
 
     /// 成熟 tracker 中选最优并上屏（Lua try_commit_mature_prefix）。
     private func tryCommitMaturePrefix(session: SentenceSession,
                                         raw: String) -> SentenceAutoCommit? {
         let retain = SentenceConfig.earlyCommitRetainedRawLength
+        // 临近上限：兜底出字免除成熟代数（只剩几代可敲，等不起 3 代）；
+        // 会话级保留间隔也一并豁免——上轮大段上屏后 raw 已收缩重建，
+        // `raw.count - lastAutoCommitRawLength` 坐标错位，触顶场景宁滥勿缺。
+        let nearCap = raw.count >= SentenceConfig.autoCommitMaxRawLength
+            - SentenceConfig.nearCapCommitGenerations
+        let requiredEvidence = nearCap ? 1 : SentenceConfig.earlyCommitRequiredEvidence
         var selected: SentenceTracker?
         for tracker in session.trackers.values {
-            if (tracker.evidenceCount >= SentenceConfig.earlyCommitRequiredEvidence
+            if (tracker.evidenceCount >= requiredEvidence
                 || tracker.strongCount >= SentenceConfig.earlyCommitRequiredStrong)
                 && tracker.rawLength > 0
                 && tracker.rawLength <= raw.count
@@ -315,7 +380,7 @@ final class SentenceEngine {
             }
         }
         guard let tracker = selected else { return nil }
-        guard raw.count - session.lastAutoCommitRawLength >= retain else { return nil }
+        guard nearCap || raw.count - session.lastAutoCommitRawLength >= retain else { return nil }
         guard !tracker.text.isEmpty else { return nil }
 
         let commit = tracker.text

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Defaults
 
 /// 整句引擎常量，集中照搬虎整句 tiger_sentence.lua 的同名配置，不散落魔法数。
 enum SentenceConfig {
@@ -20,8 +21,14 @@ enum SentenceConfig {
     static let longInputBeamWidth = 48
     /// 输出候选上限
     static let candidateLimit = 20
-    /// 组字区编码上限（≈16 个五笔字）
-    static let maxRawLength = 64
+    /// 组字区编码上限——自动上屏开启时 64（≈16 个五笔字，临近上限有概率兜底
+    /// 上屏托底，见 nearCapCommitGenerations）；关闭时 256（无兜底的长串手动
+    /// 整句，放宽到 256，触顶后新键交回系统）。
+    static let autoCommitMaxRawLength = 64
+    static let manualMaxRawLength = 256
+    static var maxRawLength: Int {
+        Defaults[.enableSentenceAutoCommit] ? autoCommitMaxRawLength : manualMaxRawLength
+    }
     /// 非首选词轻罚系数
     static let rankPenalty = 0.03
     /// 出字奖励，鼓励全覆盖
@@ -46,6 +53,14 @@ enum SentenceConfig {
     static let earlyCommitRetainedRawLength = 3
     /// 前 4 键永不计入证据
     static let firstKeysImmunity = 4
+
+    // ---- 临近组字区上限的兜底上屏（仅自动上屏开启时有意义）----
+    /// 距上限还有这么多代（代 = 键，同 evidence 计数口径）时，若概率/空码
+    /// 上屏都未触发，则调低前缀置信阈值并免除成熟代数，立即上屏最优前缀，
+    /// 赶在触顶拒键（键漏给系统）之前出字。
+    static let nearCapCommitGenerations = 5
+    /// 兜底用的前缀置信阈值（正常为 earlyCommitMinimumShare）
+    static let nearCapMinimumShare = 0.9
 
     /// 桶扩张期间提前聚合的阈值
     static let aggregateDuringExpansionThreshold = 128

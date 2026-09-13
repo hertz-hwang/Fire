@@ -50,6 +50,11 @@ class DictManager {
         queryStatement = nil
         sqlite3_finalize(reverseLookupStatement)
         reverseLookupStatement = nil
+        // 总数语句的 SQL 携带 codeMode 过滤，随 close/reinit 一并重建
+        sqlite3_finalize(candidatesCountStatement)
+        candidatesCountStatement = nil
+        sqlite3_finalize(reverseCountStatement)
+        reverseCountStatement = nil
         sqlite3_close_v2(database)
         sqlite3_shutdown()
         database = nil
@@ -333,6 +338,79 @@ class DictManager {
             return Candidate(code: displayCode, text: raw.text, type: .py)
         }
         return (candidates, hasNext: allCount > count)
+    }
+
+    /// 候选总数查询（页码指示用）：按 text 去重后的命中总数，结果按查询串缓存。
+    /// 仅多页菜单才会调用，单页路径零开销。
+    private var candidatesCountStatement: OpaquePointer?
+    private var reverseCountStatement: OpaquePointer?
+    private var candidatesCountCache: [String: Int] = [:]
+
+    private func clearCandidatesCountCache() {
+        candidatesCountCache.removeAll()
+    }
+
+    /// 常规码表候选总数：与 getStatementSql 同一过滤条件（query glob + codeMode 类型过滤）按 text 去重
+    func getCandidatesCount(query: String) -> Int {
+        if query.isEmpty { return 0 }
+        let key = "c\(Defaults[.codeMode].rawValue)|\(query)"
+        return cachedCandidatesCount(key: key, sql: {
+            let codeMode = Defaults[.codeMode]
+            return """
+                select count(*) from (
+                    select text from wb_py_dict
+                    where query glob :queryLike \(
+                        codeMode == .wubi ? "and type in ('wb', 'user')"
+                        : codeMode == .pinyin ? "and type in ('py', 'user')" : "")
+                    group by text
+                )
+                """
+        }(), queryLike: getQueryLike(query), statement: &candidatesCountStatement)
+    }
+
+    /// 反查候选总数（拼音查五笔，type = 'py'）
+    func getReverseLookupCandidatesCount(query: String) -> Int {
+        if query.isEmpty { return 0 }
+        let key = "r\(query)"
+        return cachedCandidatesCount(
+            key: key,
+            sql: """
+                select count(*) from (
+                    select text from wb_py_dict
+                    where query glob :queryLike and type = 'py'
+                    group by text
+                )
+                """,
+            queryLike: query + "*",
+            statement: &reverseCountStatement)
+    }
+
+    private func cachedCandidatesCount(
+        key: String, sql: String, queryLike: String,
+        statement: inout OpaquePointer?
+    ) -> Int {
+        if let cached = candidatesCountCache[key] { return cached }
+        if statement == nil {
+            guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else {
+                fireLog("[DictManager] prepare count statement fail: \(String(cString: sqlite3_errmsg(database)))")
+                return 0
+            }
+        }
+        sqlite3_reset(statement)
+        sqlite3_clear_bindings(statement)
+        sqlite3_bind_text(statement,
+                          sqlite3_bind_parameter_index(statement, ":queryLike"),
+                          queryLike, -1, SQLITE_TRANSIENT)
+        var total = 0
+        if sqlite3_step(statement) == SQLITE_ROW {
+            total = Int(sqlite3_column_int(statement, 0))
+        }
+        // 缓存加上限，避免超长会话无限增长
+        if candidatesCountCache.count > 512 {
+            clearCandidatesCountCache()
+        }
+        candidatesCountCache[key] = total
+        return total
     }
 
     func setCandidateToFirst(query: String, candidate: Candidate) {
@@ -673,6 +751,8 @@ class DictManager {
     func invalidateUserDictCache() {
         userDictRowsCache = nil
         userCodesCache = nil
+        // 词库变化后候选总数随之变化，页码缓存一并失效
+        clearCandidatesCountCache()
     }
 
     func getUserCandidates() -> [Candidate] {

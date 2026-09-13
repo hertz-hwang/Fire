@@ -47,6 +47,7 @@ struct ThemePane: View {
     @Default(.themeConfig) var themeConfig
     @Default(.importedThemeConfig) var importedThemeConfig
     @Default(.hideCandidatesWindow) var hideCandidatesWindow
+    @Default(.themeAppearanceMode) var themeAppearanceMode
 
     @State private var importedMessage = ""
     @State private var showAlert = false
@@ -135,6 +136,11 @@ struct ThemePane: View {
                     } else {
                         Button("导入", action: importTheme)
                     }
+                }
+                Picker("深浅模式", selection: $themeAppearanceMode) {
+                    Text("深色主题").tag(ThemeAppearanceMode.dark)
+                    Text("浅色主题").tag(ThemeAppearanceMode.light)
+                    Text("跟随系统").tag(ThemeAppearanceMode.followSystem)
                 }
                 Toggle("隐藏候选区", isOn: $hideCandidatesWindow)
                 GroupBox(label: Text("默认主题")) {
