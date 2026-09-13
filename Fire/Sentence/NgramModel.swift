@@ -480,6 +480,13 @@ final class NgramModel {
         return result
     }
 
+    /// 通用模型的一元概率（学习系统用户 n-gram 的回退平滑用）。
+    /// 未加载或词表外返回 unknown 概率，与 logp 内部一致。
+    func generalUnigramProbability(_ target: UInt32) -> Double {
+        guard loaded else { return 0.0 }
+        return Double(lookupUnigram(target))
+    }
+
     /// bigram 是否被模型观察到（生僻字孤立惩罚预留，虎整句 has_observed_bigram）
     func hasObservedBigram(prev: UInt32, target: UInt32) -> Bool {
         let entry = lookupContext(tri: false, key: UInt64(prev))

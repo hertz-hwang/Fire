@@ -56,6 +56,15 @@ class FirePreferencesController: NSObject, NSWindowDelegate {
                     UserDictPane()
                 },
                 Settings.Pane(
+                    identifier: Settings.PaneIdentifier(rawValue: "学习"),
+                     title: "学习",
+                    toolbarIcon: NSImage(systemSymbolName: "brain", accessibilityDescription: "学习")
+                        ?? NSImage(named: NSImage.preferencesGeneralName)
+                        ?? NSImage(named: "general")!
+                ) {
+                    LearningPane()
+                },
+                Settings.Pane(
                     identifier: Settings.PaneIdentifier(rawValue: "应用"),
                      title: "应用",
                     toolbarIcon: NSImage(named: NSImage.computerName) ?? NSImage(named: "general")!

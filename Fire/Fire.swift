@@ -17,6 +17,8 @@ class Fire: NSObject {
     // 逻辑
     static let candidateInserted = Notification.Name("Fire.candidateInserted")
     static let inputModeChanged = Notification.Name("Fire.inputModeChanged")
+    // 上屏撤销（学习系统负样本源）：userInfo 带 text/rank/top1Text/code/ctx
+    static let commitUndone = Notification.Name("Fire.commitUndone")
 
     var inputMode: InputMode = .zhhans
     var lastCommittedText: String = ""

@@ -35,10 +35,13 @@ final class SentenceState {
     /// 进 score 不进 massScore）
     var supplementState: Int
     var supplementScore: Double
+    /// 各维度得分拆解（「显示打分」用，与 score 同步累计）
+    var dimensions: SentenceScoreDimensions
 
     init(score: Double, massScore: Double, text: String, prev2: UInt32, prev1: UInt32,
          maxRank: Int, previous: SentenceState?, rawLength: Int, edgeCount: Int,
-         supplementState: Int = 0, supplementScore: Double = 0) {
+         supplementState: Int = 0, supplementScore: Double = 0,
+         dimensions: SentenceScoreDimensions = SentenceScoreDimensions()) {
         self.score = score
         self.massScore = massScore
         self.text = text
@@ -50,6 +53,7 @@ final class SentenceState {
         self.edgeCount = edgeCount
         self.supplementState = supplementState
         self.supplementScore = supplementScore
+        self.dimensions = dimensions
     }
 }
 
@@ -310,6 +314,23 @@ final class SentenceDecoder {
     private let lexicon = SentenceLexicon.shared
     private let supplement = SentenceSupplement.shared
 
+    // MARK: 学习系统（通道 A/B/C1）
+
+    /// 通道 A：会话缓存语言模型（per-controller，insertText/撤销喂入，
+    /// 跨 clean 存活，换输入框清空——同 contextSegments 语义）
+    let cacheModel = SessionCacheModel()
+    /// 通道 B 只读快照（LearnerCenter 发布；generation 换代时整体重解码）
+    private var learningSnapshot: LearningSnapshot = .empty
+    private var cachedLearningGeneration: Int = -1
+    /// 通道 C1：本次 decode 命中的纠错词条（键 = 整句 normalize 原码 → 词 → 胜负）
+    private var activeCorrections: [String: CorrectionStore.Entry]?
+    /// 每次 decode 开头刷新的学习配置（热路径不再读 Defaults）
+    private var learningNgramActive = false
+    private var learningCacheActive = false
+    private var learningTuning = LearningTuning()
+    /// 当前边上学习项贡献的分数增量（只进 score 的部分，massScore 剥离用）
+    private var learningAdded = 0.0
+
     /// 增量 lattice 缓存
     private var cachedRaw: [UInt8] = []
     private var cachedBuckets: [SentenceBucket?] = []
@@ -345,10 +366,74 @@ final class SentenceDecoder {
         model.loaded ? model.logp(prev2: prev2, prev1: prev1, target: target) : 0.0
     }
 
+    /// 排序用 logp：通用模型 base 与用户 n-gram（通道 B）概率空间插值。
+    /// 无用户数据/学习关闭时精确等于 base（快路径）。
+    /// 注意：只进 score；massScore 走 logp 保持证据校准纯净。
+    @inline(__always)
+    fileprivate func logpScored(prev2: UInt32, prev1: UInt32, target: UInt32) -> Double {
+        let base = logp(prev2: prev2, prev1: prev1, target: target)
+        guard learningNgramActive, let ngram = learningSnapshot.ngram else { return base }
+        return ngram.blendedLogp(base: base, prev2: prev2, prev1: prev1, target: target,
+                                 tuning: learningTuning,
+                                 generalUnigram: model.generalUnigramProbability(target)) ?? base
+    }
+
     func reset() {
         cachedRaw = []
         cachedBuckets = []
         cachedContext = ""
+    }
+
+    // MARK: - 学习状态刷新（每次 decode 开头）
+
+    /// 刷新学习通道开关、快照引用与纠错条目。
+    /// 快照换代时清空增量 lattice（用户 n-gram 数据变了，旧分数全部过期）。
+    /// cachedLearningGeneration == -2（回放注入态）时整体跳过，不覆盖注入值。
+    private func refreshLearningState(context: String, raw: [UInt8]) {
+        guard cachedLearningGeneration != -2 else { return }
+        let learningEnabled = Defaults[.enableLearning]
+        learningTuning = learningEnabled ? LearningTuning.fromDefaults() : LearningTuning()
+        let generation = learningEnabled ? LearnerCenter.shared.ngramGeneration : 0
+        if generation != cachedLearningGeneration {
+            learningSnapshot = learningEnabled ? LearnerCenter.shared.snapshot : .empty
+            cachedLearningGeneration = generation
+            cachedRaw = []
+            cachedBuckets = []
+        }
+        learningNgramActive = learningEnabled && Defaults[.enableLearningUserNgram]
+            && learningSnapshot.ngram?.hasData == true
+        learningCacheActive = learningEnabled && Defaults[.enableLearningSessionCache]
+            && !cacheModel.isEmpty
+        // 纠错条目定位：语境 = 左上下文末 ≤2 字（与记录端一致），键 = 整句原码
+        activeCorrections = nil
+        if learningEnabled, Defaults[.enableLearningCorrection], !raw.isEmpty {
+            let code = String(decoding: raw, as: UTF8.self)
+            let ctxKey = String(context.suffix(2))
+            activeCorrections = LearnerCenter.shared.correctionEntries(
+                ctx: ctxKey, code: code, correctionEnabled: true)
+        }
+    }
+
+    /// 回放调参专用（ReplayTuner CLI）：绕过 LearnerCenter 直接注入学习状态。
+    /// cachedLearningGeneration 置为哨兵 -2 后，decode 内的 refreshLearningState
+    /// 不再覆盖注入值；每个待评估编码前重新注入一次纠错条目。
+    func configureReplayLearning(snapshot: LearningSnapshot?,
+                                 corrections: [String: CorrectionStore.Entry]?,
+                                 tuning: LearningTuning) {
+        learningTuning = tuning
+        learningSnapshot = snapshot ?? .empty
+        cachedLearningGeneration = -2
+        learningNgramActive = snapshot?.ngram?.hasData == true
+        learningCacheActive = false // 回放无会话缓存（缓存态无法离线复现）
+        activeCorrections = corrections
+    }
+
+    /// 回放注入态解除，恢复正常学习状态机
+    func clearReplayLearning() {
+        cachedLearningGeneration = -1
+        learningSnapshot = .empty
+        learningNgramActive = false
+        activeCorrections = nil
     }
 
     /// normalize：小写 + 去空白，保留选重符 a-z;'0-9（虎整句 alphabet 同源）
@@ -420,10 +505,41 @@ final class SentenceDecoder {
                         var prev1 = item.prev1
                         var supState = item.supplementState
                         var supAdded = 0.0
+                        // 学习项（通道 A 缓存 + 通道 B 用户 n-gram）只进 score，
+                        // 累计进 learningAdded，massScore 侧剥离
+                        learningAdded = 0.0
+                        // 维度拆解累计：通用 logp / 用户插值增量 / 会话缓存加分
+                        var baseSum = 0.0
+                        var userSum = 0.0
+                        var cacheSum = 0.0
                         let edgeScalars = scalarsOf(edge.text)
                         let edgeChars = edge.text.map { $0 }
                         for (ci, scalar) in edgeScalars.enumerated() {
-                            score += logp(prev2: prev2, prev1: prev1, target: scalar)
+                            let base = logp(prev2: prev2, prev1: prev1, target: scalar)
+                            var charScore = base
+                            baseSum += base
+                            if learningNgramActive, let ngram = learningSnapshot.ngram,
+                               let blended = ngram.blendedLogp(
+                                    base: base, prev2: prev2, prev1: prev1, target: scalar,
+                                    tuning: learningTuning,
+                                    generalUnigram: model.generalUnigramProbability(scalar)) {
+                                charScore = blended
+                                learningAdded += blended - base
+                                userSum += blended - base
+                            }
+                            if learningCacheActive {
+                                let cacheReward = cacheModel.reward(
+                                    prev1: prev1, target: scalar,
+                                    weight: learningTuning.cacheWeight * learningTuning.strength,
+                                    maxReward: learningTuning.cacheMaxReward,
+                                    unigramFactor: learningTuning.cacheUnigramFactor)
+                                if cacheReward > 0 {
+                                    charScore += cacheReward
+                                    learningAdded += cacheReward
+                                    cacheSum += cacheReward
+                                }
+                            }
+                            score += charScore
                             score += SentenceConfig.emittedCharacterReward
                             if hasSupplements {
                                 let step = supplement.advance(state: supState, edgeChars[ci])
@@ -435,20 +551,30 @@ final class SentenceDecoder {
                             prev1 = scalar
                         }
                         // 显式选重的边不加 rank 轻罚（Lua：selected_rank==0 才罚）
+                        var rankPenaltyAdded = 0.0
                         if selector.rank == 0 {
-                            score -= SentenceConfig.rankPenalty * Foundation.log(Double(edge.rank))
+                            rankPenaltyAdded = SentenceConfig.rankPenalty * Foundation.log(Double(edge.rank))
+                            score -= rankPenaltyAdded
                         }
                         // 整码最优单字奖励只加在 score，不进 massScore（置信度）
-                        var massDelta = score - item.score
+                        var massDelta = score - item.score - learningAdded
                         var singleRewardAdded = 0.0
                         if wholeInputEdge && selector.rank == 0
                             && edge.optimalSingle && edgeScalars.count == 1 {
                             singleRewardAdded = SentenceConfig.wholeInputSingleCharacterReward
                             score += singleRewardAdded
-                            massDelta = score - item.score - supAdded - singleRewardAdded
+                            massDelta = score - item.score - supAdded - singleRewardAdded - learningAdded
                         } else {
                             massDelta -= supAdded
                         }
+                        var dims = item.dimensions
+                        dims.generalNgram += baseSum
+                        dims.userNgram += userSum
+                        dims.sessionCache += cacheSum
+                        dims.supplement += supAdded
+                        dims.structural += Double(edgeScalars.count)
+                            * SentenceConfig.emittedCharacterReward
+                            + singleRewardAdded - rankPenaltyAdded
                         let state = SentenceState(
                             score: score,
                             massScore: item.massScore + massDelta,
@@ -459,7 +585,8 @@ final class SentenceDecoder {
                             rawLength: consumedEnd,
                             edgeCount: item.edgeCount + 1,
                             supplementState: supState,
-                            supplementScore: item.supplementScore + supAdded)
+                            supplementScore: item.supplementScore + supAdded,
+                            dimensions: dims)
                         let bucket = buckets[consumedEnd] ?? SentenceBucket()
                         bucket.append(state)
                         buckets[consumedEnd] = bucket
@@ -472,16 +599,23 @@ final class SentenceDecoder {
     // MARK: - evaluate / segmented
 
     fileprivate func evaluateState(_ item: SentenceState) -> SentenceCompleted {
-        let endingAdjustment = logp(prev2: item.prev2, prev1: item.prev1, target: NgramModel.eos)
+        let endingBase = logp(prev2: item.prev2, prev1: item.prev1, target: NgramModel.eos)
+        // 排序分吃用户 n-gram 插值；置信度（massScore）保持纯通用模型，
+        // 自动上屏证据的校准不随学习数据漂移
+        let endingScored = logpScored(prev2: item.prev2, prev1: item.prev1, target: NgramModel.eos)
+        var dims = item.dimensions
+        dims.generalNgram += endingBase
+        dims.userNgram += endingScored - endingBase
         return SentenceCompleted(
-            score: item.score + endingAdjustment,
-            confidenceScore: item.massScore + endingAdjustment,
+            score: item.score + endingScored,
+            confidenceScore: item.massScore + endingBase,
             text: item.text,
             supplementScore: item.supplementScore,
             maxRank: Swift.max(1, item.maxRank),
             edgeCount: item.edgeCount,
             rawLength: item.rawLength,
-            path: item)
+            path: item,
+            dimensions: dims)
     }
 
     private func segmentedFromPath(_ path: SentenceState?, raw: [UInt8]) -> String {
@@ -515,15 +649,36 @@ final class SentenceDecoder {
         for state in completedBucket.items {
             var candidate = evaluateState(state)
             candidate.segmented = segmentedFromPath(state, raw: raw)
+            // 通道 C1：纠错对按整句文字命中加分（只进 score，不进置信度）。
+            // emit 每次解码都重跑，热写入即时生效，无须 lattice 失效
+            if let corrections = activeCorrections,
+               let entry = corrections[candidate.text] {
+                let bonus = CorrectionStore.bonus(wins: entry.wins, losses: entry.losses,
+                                                  tuning: learningTuning)
+                if bonus != 0 {
+                    candidate.score += bonus
+                    candidate.dimensions.correction += bonus
+                }
+            }
             all.append(candidate)
+            // 维度拆解必须与总分守恒（「显示打分」的可信度保证）
+            #if DEBUG
+            let dims = candidate.dimensions
+            let dimsSum = dims.generalNgram + dims.userNgram + dims.sessionCache
+                + dims.supplement + dims.correction + dims.structural
+            assert(abs(dimsSum - candidate.score) < 1e-6,
+                   "score dimensions mismatch: sum=\(dimsSum) score=\(candidate.score)")
+            #endif
         }
 
-        // 单字重码组句开 + 分段路径 → 分数竞争；否则保持词库序
+        // 单字重码组句开 + 分段路径 → 分数竞争；否则保持词库序。
+        // 该输入存在纠错记录时强制分数竞争：纠错语义就是"同码下我要另一个"，
+        // rank-first 会把纠错加分全部埋掉
         // （Lua prefer_score_over_lexicon_rank：allow 关时恒 rank-first）
         let hasSegmentedPath = all.contains {
             $0.path.previous != nil && $0.path.previous!.rawLength > 0
         }
-        let better = (allowDuplicateSingle && hasSegmentedPath)
+        let better = (allowDuplicateSingle && hasSegmentedPath) || activeCorrections != nil
             ? stateBetterScoreFirst : stateBetterRankFirst
         var result = all
         if result.count > SentenceConfig.candidateLimit {
@@ -745,6 +900,9 @@ final class SentenceDecoder {
             cachedBuckets = []
             cachedContext = context
         }
+        // 学习系统状态：快照换代（通道 B 数据变更）→ 整体重解码；
+        // 纠错条目（通道 C1）在 emit 阶段按原码即时命中，不参与失效
+        refreshLearningState(context: context, raw: raw)
 
         let signpostID = OSSignpostID(log: .sentence)
         os_signpost(.begin, log: OSLog.sentence, name: "decode", signpostID: signpostID)

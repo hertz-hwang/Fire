@@ -54,11 +54,25 @@ private func swiftFont(_ theme: ApperanceThemeConfig, size: CGFloat) -> Font {
     return Font.system(size: size)
 }
 
+/// 打分显示的 NSFont（默认加粗，测量列宽用；自定义字体取同族 Bold 变体）
+private func themeScoreFont(_ theme: ApperanceThemeConfig, size: CGFloat) -> NSFont {
+    let base = themeFont(theme, size: size)
+    guard theme.scoreBold else { return base }
+    return NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask)
+}
+
+/// 打分显示的 SwiftUI Font
+private func swiftScoreFont(_ theme: ApperanceThemeConfig, size: CGFloat) -> Font {
+    let base = swiftFont(theme, size: size)
+    return theme.scoreBold ? base.weight(.bold) : base
+}
+
 /// 竖排的列宽与行高
 private struct CandidateColumns {
     var indexWidth: CGFloat = 0
     var textWidth: CGFloat = 0
     var codeWidth: CGFloat = 0
+    var scoreWidth: CGFloat = 0
     var rowHeight: CGFloat = 0
 }
 
@@ -76,6 +90,9 @@ struct CandidateView: View {
     var textWidth: CGFloat? = nil
     var codeText: String = ""
     var codeWidth: CGFloat? = nil
+    /// 整句打分显示串（「显示打分」开启时整句候选才有）
+    var scoreText: String = ""
+    var scoreWidth: CGFloat? = nil
     /// 序号与候选词间距：竖排 = column_gap，横排 = INDEX_GAP
     var indexGap: CGFloat = 8
     /// 候选词与编码提示间距：竖排 = column_gap
@@ -126,6 +143,14 @@ struct CandidateView: View {
                     .fixedSize()
                     .padding(.leading, columnGap)
                     .frame(width: codeWidth.map { $0 + columnGap }, alignment: .leading)
+            }
+            if !scoreText.isEmpty {
+                Text(scoreText)
+                    .font(swiftScoreFont(theme, size: CGFloat(theme.scoreFontSize)))
+                    .foregroundColor(Color(theme.scoreColor))
+                    .fixedSize()
+                    .padding(.leading, columnGap)
+                    .frame(width: scoreWidth.map { $0 + columnGap }, alignment: .leading)
             }
         }
         .onTapGesture {
@@ -205,6 +230,9 @@ struct CandidatesView: View {
     var directionOverride: CandidatesDirection? = nil
     var showCodeInWindowOverride: Bool? = nil
     var wubiCodeTipOverride: Bool? = nil
+    /// 尺寸动画中间帧的对齐角：窗框从旧尺寸滑向新尺寸时内容钉在不动的那一角，
+    /// 文字不随中间帧滑动/折行；常态下窗口与内容同尺寸，该参数无效果
+    var contentAlignment: Alignment = .topLeading
 
     @Default(.candidatesDirection) private var directionDefault
     @Default(.themeConfig) private var themeConfig
@@ -225,7 +253,7 @@ struct CandidatesView: View {
     }
 
     private func measureColumns(
-        textFont: NSFont, indexFont: NSFont, codeFont: NSFont,
+        textFont: NSFont, indexFont: NSFont, codeFont: NSFont, scoreFont: NSFont,
         rowPad: CGFloat, showHints: Bool
     ) -> CandidateColumns {
         var columns = CandidateColumns()
@@ -240,6 +268,12 @@ struct CandidatesView: View {
             if showHints {
                 let codeSize = measure(getShownCode(candidate: candidate, origin: origin), codeFont)
                 columns.codeWidth = max(columns.codeWidth, codeSize.width)
+            }
+            if let scoreText = candidate.scoreText {
+                let scoreSize = measure(scoreText, scoreFont)
+                columns.scoreWidth = max(columns.scoreWidth, scoreSize.width)
+                let scoreRowHeight = measure(scoreText, scoreFont).height + rowPad * 2
+                columns.rowHeight = max(columns.rowHeight, scoreRowHeight)
             }
         }
         return columns
@@ -300,18 +334,19 @@ struct CandidatesView: View {
     /// 竖排（draw_vertical）：一行一个候选，序号/候选词/编码提示三列
     private func verticalBody(
         theme: ApperanceThemeConfig,
-        textFont: NSFont, indexFont: NSFont, codeFont: NSFont,
+        textFont: NSFont, indexFont: NSFont, codeFont: NSFont, scoreFont: NSFont,
         rowPad: CGFloat, gap: CGFloat, radius: CGFloat,
         padLeft: CGFloat, padRight: CGFloat, showHints: Bool
     ) -> some View {
         let columns = measureColumns(
-            textFont: textFont, indexFont: indexFont, codeFont: codeFont,
+            textFont: textFont, indexFont: indexFont, codeFont: codeFont, scoreFont: scoreFont,
             rowPad: rowPad, showHints: showHints)
         // 有序号列（indexWidth > 0）时内容宽含序号列与列间距；纯占位提示（如删除确认）只有文字列
         let contentWidth = (columns.indexWidth > 0
             ? columns.indexWidth + gap + columns.textWidth
             : columns.textWidth)
             + (columns.codeWidth > 0 ? gap + columns.codeWidth : 0)
+            + (columns.scoreWidth > 0 ? gap + columns.scoreWidth : 0)
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(candidates.enumerated()), id: \.offset) { (index, candidate) in
                 let selected = index == highlightIndex
@@ -327,6 +362,8 @@ struct CandidatesView: View {
                     codeText: showHints
                         ? getShownCode(candidate: candidate, origin: origin) : "",
                     codeWidth: columns.codeWidth > 0 ? columns.codeWidth : nil,
+                    scoreText: candidate.scoreText ?? "",
+                    scoreWidth: columns.scoreWidth > 0 ? columns.scoreWidth : nil,
                     indexGap: gap,
                     columnGap: gap,
                     themeOverride: theme
@@ -380,6 +417,7 @@ struct CandidatesView: View {
                         indexWidth: nil,
                         textWidth: nil,
                         codeText: "",
+                        scoreText: candidate.scoreText ?? "",
                         indexGap: CandidateRenderConst.indexGap,
                         themeOverride: theme
                     )
@@ -417,6 +455,7 @@ struct CandidatesView: View {
         let textFont = themeFont(theme, size: CGFloat(theme.fontSize))
         let indexFont = themeFont(theme, size: CGFloat(theme.indexFontSize))
         let codeFont = themeFont(theme, size: CGFloat(theme.codeFontSize))
+        let scoreFont = themeScoreFont(theme, size: CGFloat(theme.scoreFontSize))
         let rowPad = CGFloat(theme.rowPadding)
         let gap = CGFloat(theme.candidateSpace)
         let radius = CGFloat(theme.windowBorderRadius)
@@ -432,6 +471,7 @@ struct CandidatesView: View {
                     verticalBody(
                         theme: theme,
                         textFont: textFont, indexFont: indexFont, codeFont: codeFont,
+                        scoreFont: scoreFont,
                         rowPad: rowPad, gap: gap, radius: radius,
                         padLeft: padLeft, padRight: padRight, showHints: showHints)
                 } else {
@@ -449,6 +489,19 @@ struct CandidatesView: View {
             .fixedSize()
             .background(Color(theme.windowBackgroundColor))
             .cornerRadius(radius, antialiased: true)
+            // 主题描边：strokeBorder 画在内容边界内侧，不会被窗口裁掉
+            .overlay(
+                Group {
+                    if theme.borderLineWidth > 0 {
+                        RoundedRectangle(cornerRadius: radius, style: .continuous)
+                            .strokeBorder(Color(theme.windowBorderColorValue),
+                                          lineWidth: CGFloat(theme.borderLineWidth))
+                    }
+                }
+            )
+            // 窗口比内容大/小（尺寸动画中间帧）时把内容钉到固定角；无具体提案
+            // （fittingSize 测量）时 infinity 不生效，尺寸仍是内容的理想尺寸
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: contentAlignment)
     }
 }
 

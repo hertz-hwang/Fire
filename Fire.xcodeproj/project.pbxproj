@@ -70,6 +70,15 @@
 		AA5E0008000000000SENT008 /* SentenceSupplement.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0008000000000SENT108 /* SentenceSupplement.swift */; };
 		AA5E0005000000000SENT005 /* SentenceTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0005000000000SENT105 /* SentenceTypes.swift */; };
 		AA5E0006000000000SENT006 /* sentence-ngram-mobile.bin in Resources */ = {isa = PBXBuildFile; fileRef = AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */; };
+		AA5E0001000000000LRN001 /* LearnerCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0001000000000LRN101 /* LearnerCenter.swift */; };
+		AA5E0002000000000LRN002 /* LearningStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0002000000000LRN102 /* LearningStore.swift */; };
+		AA5E0003000000000LRN003 /* UserCharNgram.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0003000000000LRN103 /* UserCharNgram.swift */; };
+		AA5E0004000000000LRN004 /* CorrectionPairs.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0004000000000LRN104 /* CorrectionPairs.swift */; };
+		AA5E0005000000000LRN005 /* SessionCacheModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0005000000000LRN105 /* SessionCacheModel.swift */; };
+		AA5E0006000000000LRN006 /* LearningTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0006000000000LRN106 /* LearningTypes.swift */; };
+		AA5E0007000000000LRN007 /* ReplayTuner.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0007000000000LRN107 /* ReplayTuner.swift */; };
+		AA5E0008000000000LRN008 /* LearningPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0008000000000LRN108 /* LearningPane.swift */; };
+		AA5E0009000000000LRN009 /* LearningSerialization.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0009000000000LRN109 /* LearningSerialization.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -150,6 +159,15 @@
 		AA5E0009000000000SENT109 /* SentenceDiff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentenceDiff.swift; sourceTree = "<group>"; };
 		AA5E0006000000000SENT106 /* sentence-ngram-mobile.bin */ = {isa = PBXFileReference; lastKnownFileType = file; path = "sentence-ngram-mobile.bin"; sourceTree = "<group>"; };
 		AA5E000B000000000SCHEM0B /* schemas */ = {isa = PBXFileReference; lastKnownFileType = folder; path = schemas; sourceTree = "<group>"; };
+		AA5E0001000000000LRN101 /* LearnerCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearnerCenter.swift; sourceTree = "<group>"; };
+		AA5E0002000000000LRN102 /* LearningStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningStore.swift; sourceTree = "<group>"; };
+		AA5E0003000000000LRN103 /* UserCharNgram.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserCharNgram.swift; sourceTree = "<group>"; };
+		AA5E0004000000000LRN104 /* CorrectionPairs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrectionPairs.swift; sourceTree = "<group>"; };
+		AA5E0005000000000LRN105 /* SessionCacheModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCacheModel.swift; sourceTree = "<group>"; };
+		AA5E0006000000000LRN106 /* LearningTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningTypes.swift; sourceTree = "<group>"; };
+		AA5E0007000000000LRN107 /* ReplayTuner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayTuner.swift; sourceTree = "<group>"; };
+		AA5E0008000000000LRN108 /* LearningPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningPane.swift; sourceTree = "<group>"; };
+		AA5E0009000000000LRN109 /* LearningSerialization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningSerialization.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -252,6 +270,7 @@
 				67C9A0082AB53E83000B5281 /* types.swift */,
 				67C9A0032AB53E83000B5281 /* Utils.swift */,
 				AA5E0007000000000SENTG07 /* Sentence */,
+				AA5E0007000000000LRNG07 /* Learning */,
 				67C99FF82AB53E62000B5281 /* Utils */,
 				67C99FEB2AB53DB2000B5281 /* AppDelegate.swift */,
 				67C99FF22AB53DB4000B5281 /* Fire.entitlements */,
@@ -322,6 +341,7 @@
 				67C9A0292AB53ED3000B5281 /* ApplicationPane.swift */,
 				67C9A02A2AB53ED3000B5281 /* ThemePane.swift */,
 				67C9A02B2AB53ED3000B5281 /* ThesaurusPane.swift */,
+				AA5E0008000000000LRN108 /* LearningPane.swift */,
 				67C9A02C2AB53ED3000B5281 /* PunctuationPane.swift */,
 			);
 			path = Preferences;
@@ -364,6 +384,21 @@
 				AA5E0009000000000SENT109 /* SentenceDiff.swift */,
 			);
 			path = Sentence;
+			sourceTree = "<group>";
+		};
+		AA5E0007000000000LRNG07 /* Learning */ = {
+			isa = PBXGroup;
+			children = (
+				AA5E0006000000000LRN106 /* LearningTypes.swift */,
+				AA5E0001000000000LRN101 /* LearnerCenter.swift */,
+				AA5E0002000000000LRN102 /* LearningStore.swift */,
+				AA5E0003000000000LRN103 /* UserCharNgram.swift */,
+				AA5E0004000000000LRN104 /* CorrectionPairs.swift */,
+				AA5E0005000000000LRN105 /* SessionCacheModel.swift */,
+				AA5E0007000000000LRN107 /* ReplayTuner.swift */,
+				AA5E0009000000000LRN109 /* LearningSerialization.swift */,
+			);
+			path = Learning;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -533,6 +568,15 @@
 				67C99FFF2AB53E62000B5281 /* TipsWindow.swift in Sources */,
 				3089B2991CFC44A16433AC96 /* CharDivTipWindow.swift in Sources */,
 				CAE0DB697120E13EA84FEC07 /* HoverTrackingView.swift in Sources */,
+				AA5E0001000000000LRN001 /* LearnerCenter.swift in Sources */,
+				AA5E0002000000000LRN002 /* LearningStore.swift in Sources */,
+				AA5E0003000000000LRN003 /* UserCharNgram.swift in Sources */,
+				AA5E0004000000000LRN004 /* CorrectionPairs.swift in Sources */,
+				AA5E0005000000000LRN005 /* SessionCacheModel.swift in Sources */,
+				AA5E0006000000000LRN006 /* LearningTypes.swift in Sources */,
+				AA5E0007000000000LRN007 /* ReplayTuner.swift in Sources */,
+				AA5E0008000000000LRN008 /* LearningPane.swift in Sources */,
+				AA5E0009000000000LRN009 /* LearningSerialization.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -115,7 +115,10 @@ class Statistics {
         }
         if candidate.type == CandidateType.placeholder { return }
         let appBundleId = notification.userInfo?["appBundleId"] as? String ?? ""
-        let sql = "insert into data(text, type, code, createdAt, appBundleId, keyCount) values (:text, :type, :code, :createdAt, :appBundleId, :keyCount)"
+        // learned：该行是否同时被学习系统实时消费。与 LearnerCenter 读同一
+        // 开关、同一通知，时序上等价；历史回填只补 learned=0 的行
+        let learned = Defaults[.enableLearning] ? 1 : 0
+        let sql = "insert into data(text, type, code, createdAt, appBundleId, keyCount, learned) values (:text, :type, :code, :createdAt, :appBundleId, :keyCount, :learned)"
         var insertStatement: OpaquePointer?
         if sqlite3_prepare_v2(database, sql, -1, &insertStatement, nil) == SQLITE_OK {
             let format = Statistics.insertDateFormatter
@@ -138,6 +141,9 @@ class Statistics {
             sqlite3_bind_int(insertStatement,
                              sqlite3_bind_parameter_index(insertStatement, ":keyCount"),
                              Int32(max(0, keyCount)))
+            sqlite3_bind_int(insertStatement,
+                             sqlite3_bind_parameter_index(insertStatement, ":learned"),
+                             Int32(learned))
 
             if sqlite3_step(insertStatement) == SQLITE_DONE {
                 sqlite3_finalize(insertStatement)
@@ -1048,7 +1054,7 @@ class Statistics {
 
     private var database: OpaquePointer?
     private let keychain = KeychainSwift(keyPrefix: Bundle.main.bundleIdentifier!)
-    private let upgrade = [
+    private static let upgrade = [
         """
         CREATE TABLE IF NOT EXISTS "data" (
             "id" INTEGER PRIMARY KEY NOT NULL,
@@ -1059,10 +1065,14 @@ class Statistics {
         )
         """,
         "ALTER TABLE data ADD COLUMN appBundleId TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE data ADD COLUMN keyCount INTEGER NOT NULL DEFAULT 0"
+        "ALTER TABLE data ADD COLUMN keyCount INTEGER NOT NULL DEFAULT 0",
+        // v4：learned 标记列——该行文字是否已被学习系统消费过。插入时按
+        // 当时的学习开关写值；历史回填只补 learned=0 的行，保证实时学习与
+        // 历史回填两个数据源不重叠（重复计数）
+        "ALTER TABLE data ADD COLUMN learned INTEGER NOT NULL DEFAULT 0"
     ]
 
-    private func getVersion() -> Int32 {
+    private static func getVersion(_ database: OpaquePointer?) -> Int32 {
         let sql = "PRAGMA user_version"
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK,
@@ -1075,7 +1085,7 @@ class Statistics {
         return 0
     }
 
-    private func setVersion(_ version: Int32) -> Bool {
+    private static func setVersion(_ database: OpaquePointer?, _ version: Int32) -> Bool {
         let sql = "PRAGMA user_version = \(version)"
         if sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK {
             return true
@@ -1083,8 +1093,10 @@ class Statistics {
         return false
     }
 
-    private func migrate() -> Bool {
-        let curVersion = getVersion()
+    /// 迁移到最新 schema。开放给学习系统：其自建的统计库连接（CLI 路径下
+    /// Statistics.shared 未初始化）也要保证 learned 列存在。
+    static func migrate(_ database: OpaquePointer?) -> Bool {
+        let curVersion = getVersion(database)
         NSLog("[Statistics] migrate curVersion: \(curVersion)")
         if curVersion >= upgrade.count {
             return true
@@ -1093,7 +1105,7 @@ class Statistics {
             sqlite3_exec(database, upgrade[i], nil, nil, nil)
         }
         NSLog("[Statistics] migrate setVersion: \(upgrade.count)")
-        return setVersion(Int32(upgrade.count))
+        return setVersion(database, Int32(upgrade.count))
     }
 
     private func initDB() {
@@ -1124,7 +1136,7 @@ class Statistics {
             nil
         ) == SQLITE_OK {
             sqlite3_key(database, key!, Int32(key!.count))
-            _ = migrate()
+            _ = Statistics.migrate(database)
         } else {
             NSLog("[Statistics] init DB, open error: \(String(cString: sqlite3_errmsg(database)))")
         }

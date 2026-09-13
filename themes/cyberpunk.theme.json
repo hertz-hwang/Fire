@@ -1,0 +1,74 @@
+/* 赛博朋克主题 · Fire 输入法
+ * 颜色支持 3/4/6/8 位 hex：8 位为 #RRGGBBAA，末两位是透明度（00 全透明 ~ FF 不透明）
+ * 尺寸单位均为 pt；"system" 字体表示系统默认
+ * 本文件为 JSONC 格式，// 与 注释在导入时会被自动剥离，可直接导入使用 */
+{
+  "schemaVersion": 2,               // 主题结构版本：当前为 2，旧主题缺新字段时回落默认样式
+  "id": "cyberpunk",                // 主题唯一标识：导入/切换/删除按它识别，勿与内置主题重名
+  "name": "赛博朋克",                // 主题显示名：设置 → 主题列表里展示
+  "author": "Hertz",                // 作者署名
+
+  /* ===== 浅色（日间赛博）：霓虹色转译为白底可读的深色调 ===== */
+  "light": {
+    "windowBackgroundColor": "#F1EFFB",    // 候选框窗口背景色：淡紫底，承住彩色文字
+    "windowPaddingTop": 10,                // 窗口内容距上边缘留白
+    "windowPaddingLeft": 12,               // 窗口内容距左边缘留白
+    "windowPaddingRight": 12,              // 窗口内容距右边缘留白
+    "windowPaddingBottom": 10,             // 窗口内容距下边缘留白
+    "windowBorderRadius": 6,               // 窗口圆角半径：小圆角更硬朗；高亮条圆角为它的一半
+    "windowBorderWidth": 1,                // 窗口描边线宽：0 或缺省 = 不画边框
+    "windowBorderColor": "#5B21B680",      // 描边颜色：半透明紫，浅底上只做轻勾勒
+    "originCodeColor": "#5B21B6",          // 顶部编码行（组字区）文字颜色：深紫
+    "originCandidatesSpace": 6,            // 编码行与候选区间距（预留字段，当前版本渲染未使用）
+    "candidateSpace": 12,                  // 候选词间距：横排为水平间距，竖排为列间距；比默认 8 宽松
+    "candidateIndexColor": "#B45309",      // 候选序号颜色：琥珀色，荧光黄在白底上的可读替代
+    "candidateTextColor": "#241B3A",       // 候选文字颜色：带紫调的墨色
+    "candidateCodeColor": "#6F6A8F",       // 候选编码提示颜色：紫灰，弱于正文
+    "selectedIndexColor": "#B45309",       // 高亮候选的序号颜色
+    "selectedTextColor": "#0E7490",        // 高亮候选的文字颜色：深青，霓虹青的暗化版
+    "selectedCodeColor": "#0E7490",        // 高亮候选的编码提示颜色
+    "selectedBackgroundColor": "#FCEE0A59",// 高亮候选底色：荧光黄 35% 透明光晕
+    "pageIndicatorColor": "#5B21B6",       // 页码指示（"n/m"）颜色
+    "pageIndicatorDisabledColor": "#5B21B659", // 页码指示不可用态：同色低透明
+    "candidateScoreColor": "#9333EA",      // 整句打分颜色（「显示打分」开关）：紫，保持默认紫的辨识度
+    "candidateScoreFontSize": 11,          // 打分字号
+    "candidateScoreBold": true,            // 打分是否加粗
+    "fontName": "Menlo",                   // 字体族：Menlo 等宽让编码/序号/打分终端化，中文自动回退系统字体
+    "fontSize": 16,                        // 候选文字字号
+    "candidateIndexFontSize": 11,          // 序号字号
+    "candidateCodeFontSize": 12,           // 编码提示字号（顶部编码行同用）
+    "candidateRowPadding": 4               // 候选行内上下留白
+  },
+
+  /* ===== 深色（主视觉）：深紫黑夜空 + 霓虹青/品红/荧光黄 ===== */
+  "dark": {
+    "windowBackgroundColor": "#0D0221",    // 候选框窗口背景色：深紫黑，霓虹色的夜
+    "windowPaddingTop": 10,                // 窗口内容距上边缘留白
+    "windowPaddingLeft": 12,               // 窗口内容距左边缘留白
+    "windowPaddingRight": 12,              // 窗口内容距右边缘留白
+    "windowPaddingBottom": 10,             // 窗口内容距下边缘留白
+    "windowBorderRadius": 6,               // 窗口圆角半径：小圆角更硬朗；高亮条圆角为它的一半
+    "windowBorderWidth": 1.5,              // 窗口描边线宽：霓虹机箱轮廓感
+    "windowBorderColor": "#00F0FFCC",      // 描边颜色：霓虹青 80% 透明，微透出一点底色
+    "originCodeColor": "#00F0FF",          // 顶部编码行（组字区）文字颜色：霓虹青发光
+    "originCandidatesSpace": 6,            // 编码行与候选区间距（预留字段，当前版本渲染未使用）
+    "candidateSpace": 12,                  // 候选词间距：宽间距让霓虹字之间有呼吸感
+    "candidateIndexColor": "#FCEE0A",      // 候选序号颜色：荧光黄（赛博朋克 2077 黄）
+    "candidateTextColor": "#EAF6FF",       // 候选文字颜色：冷白微青，保证正文可读
+    "candidateCodeColor": "#8B7BC7",       // 候选编码提示颜色：暗紫，弱化不抢正文
+    "selectedIndexColor": "#FCEE0A",       // 高亮候选的序号颜色：荧光黄
+    "selectedTextColor": "#00F0FF",        // 高亮候选的文字颜色：霓虹青，与品红底互补
+    "selectedCodeColor": "#00F0FF",        // 高亮候选的编码提示颜色
+    "selectedBackgroundColor": "#FF2A6D38",// 高亮候选底色：品红 22% 透明光晕（打分特意避开品红防同色）
+    "pageIndicatorColor": "#00F0FF",       // 页码指示（"n/m"）颜色
+    "pageIndicatorDisabledColor": "#00F0FF59", // 页码指示不可用态：同色低透明
+    "candidateScoreColor": "#C77DFF",      // 整句打分颜色：电紫，避开高亮底品红同色系
+    "candidateScoreFontSize": 11,          // 打分字号
+    "candidateScoreBold": true,            // 打分是否加粗
+    "fontName": "Menlo",                   // 字体族：Menlo 等宽让编码/序号/打分终端化，中文自动回退系统字体
+    "fontSize": 16,                        // 候选文字字号
+    "candidateIndexFontSize": 11,          // 序号字号
+    "candidateCodeFontSize": 12,           // 编码提示字号（顶部编码行同用）
+    "candidateRowPadding": 4               // 候选行内上下留白
+  }
+}

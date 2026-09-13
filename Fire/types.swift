@@ -119,6 +119,8 @@ extension Defaults.Keys {
     static let enableSentenceMode = Key<Bool>("enableSentenceMode", default: false)
     // 整句自动上屏：概率型提前上屏 + 空码自动上屏
     static let enableSentenceAutoCommit = Key<Bool>("enableSentenceAutoCommit", default: true)
+    // 整句候选末尾显示各维度打分（通用ngram、用户ngram等，样式走主题配置）
+    static let enableSentenceScore = Key<Bool>("enableSentenceScore", default: false)
     // 单字重码组句（虎整句 tiger_sentence_allow_duplicate_single）：
     // 开启时分段路径允许同码非首选单字参与组句；多字非首选仍需显式选重
     static let enableSentenceAllowDuplicateSingle = Key<Bool>("enableSentenceAllowDuplicateSingle", default: true)
@@ -229,6 +231,18 @@ extension Defaults.Keys {
     static let enableStatistics = Key<Bool>("enableStatistics", default: true)
     //            ^            ^         ^                ^
     //           Key          Type   UserDefaults name   Default value
+
+    // 学习系统：从上屏/撤销信号中学习用户用词习惯，辅助整句 n-gram 模型
+    // 总开关（关闭后既不记录新信号，解码也完全忽略学习数据）
+    static let enableLearning = Key<Bool>("enableLearning", default: true)
+    // 通道 B：持久化字符级用户 n-gram（置信度门控插值进通用模型）
+    static let enableLearningUserNgram = Key<Bool>("enableLearningUserNgram", default: true)
+    // 通道 A：会话缓存语言模型（最近上屏窗口内的字符/二元触发加分）
+    static let enableLearningSessionCache = Key<Bool>("enableLearningSessionCache", default: true)
+    // 通道 C1：胜负纠错对（选了非首选时记正/负证据，下次同码同语境生效）
+    static let enableLearningCorrection = Key<Bool>("enableLearningCorrection", default: true)
+    // 学习强度：线性缩放各通道加分权重与插值上限（0.2~2.0，1 为默认标定值）
+    static let learningStrength = Key<Double>("learningStrength", default: 1.0)
 }
 
 enum InputMode: String, Defaults.Serializable {
@@ -255,12 +269,16 @@ struct Candidate: Hashable {
     let text: String
     let type: CandidateType
     let label: String
+    /// 整句候选的打分显示串（「显示打分」开启时整句候选才有）
+    let scoreText: String?
 
-    init(code: String, text: String, type: CandidateType, label: String? = nil) {
+    init(code: String, text: String, type: CandidateType, label: String? = nil,
+         scoreText: String? = nil) {
         self.code = code
         self.text = text
         self.type = type
         self.label = label ?? text
+        self.scoreText = scoreText
     }
 }
 

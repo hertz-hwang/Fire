@@ -52,6 +52,88 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.terminate(nil)
                 return false
             }
+            if command == "--replay-eval" {
+                // 离线回放评估：统计历史整句的 top-1 命中率（学习基线/对比）
+                let code = ReplayTuner.run()
+                exit(code)
+            }
+            if command == "--decode-probe" {
+                // 整句解码探针：打印候选的各维度打分拆解（显示打分验证/调参归因）
+                exit(SentenceDecodeProbe.run(codes: Array(CommandLine.arguments.dropFirst(2))))
+            }
+            if command == "--learning-selftest" {
+                // 学习数据 TCSKNM02 导入导出自检（合成计数往返 + 真实读取器交叉验证）
+                exit(LearningSelfTest.run())
+            }
+            if command == "--rebuild-learning" {
+                // 全量重建通道 B：清空计数 + 重置 learned 标记 + 重放全部历史
+                let semaphore = DispatchSemaphore(value: 0)
+                LearnerCenter.shared.rebuildFromHistory { processed, finished in
+                    if finished {
+                        print("[Learning] rebuild finished: \(processed) records")
+                        semaphore.signal()
+                    }
+                }
+                semaphore.wait()
+                exit(0)
+            }
+            if command == "--export-learning" {
+                guard CommandLine.arguments.count > 2 else {
+                    print("usage: --export-learning <path>")
+                    exit(1)
+                }
+                let path = CommandLine.arguments[2]
+                // 回调在后台线程交付：信号量同步等待，处理完即退出，
+                // 不落入完整应用启动（避免与 Statistics.shared 并发初始化）
+                let semaphore = DispatchSemaphore(value: 0)
+                var exitCode: Int32 = 0
+                LearnerCenter.shared.exportNgramData { result in
+                    switch result {
+                    case .success(let data):
+                        do {
+                            try data.write(to: URL(fileURLWithPath: path))
+                            print("[Learning] exported \(data.count) bytes -> \(path)")
+                        } catch {
+                            print("[Learning] write failed: \(error)")
+                            exitCode = 1
+                        }
+                    case .failure(let error):
+                        print("[Learning] export failed: \(error)")
+                        exitCode = 1
+                    }
+                    semaphore.signal()
+                }
+                semaphore.wait()
+                exit(exitCode)
+            }
+            if command == "--import-learning" {
+                guard CommandLine.arguments.count > 2 else {
+                    print("usage: --import-learning <path>")
+                    exit(1)
+                }
+                let path = CommandLine.arguments[2]
+                let data: Data
+                do {
+                    data = try Data(contentsOf: URL(fileURLWithPath: path))
+                } catch {
+                    print("[Learning] read failed: \(error)")
+                    exit(1)
+                }
+                let semaphore = DispatchSemaphore(value: 0)
+                var exitCode: Int32 = 0
+                LearnerCenter.shared.importNgramData(data) { result in
+                    switch result {
+                    case .success(let entries):
+                        print("[Learning] imported \(entries) entries from \(path)")
+                    case .failure(let error):
+                        print("[Learning] import failed: \(error)")
+                        exitCode = 1
+                    }
+                    semaphore.signal()
+                }
+                semaphore.wait()
+                exit(exitCode)
+            }
             if command == "--stop" {
                 print("[Fire] launch argument: \(command)")
                 print("[Fire] stop")
@@ -86,6 +168,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             CandidatesPreviewRenderer.run()
             return
         }
+        // 候选窗动画自检（调试）：驱动渐入/尺寸/渐出全流程采样断言后退出
+        if CommandLine.arguments.contains("--preview-window-anim") {
+            WindowAnimationSelfCheck.run()
+            return
+        }
         // 拼音方案锁定项归一（覆盖老版本升级残留的自由配置）
         enforcePinyinInputModeDefaults()
         // 老版本平铺在 Resources 根的码表路径迁移到 Resources/schemas
@@ -101,6 +188,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("[Fire] app is running")
         fire = Fire.shared
         statistics = Statistics.shared
+        // 学习系统：订阅上屏/撤销信号，加载 user-learning.db，必要时自动回填
+        _ = LearnerCenter.shared
         statusBar = StatusBar.shared
         cliServer = FireCLIServer()
         registerURLHandler()

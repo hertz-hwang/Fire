@@ -36,7 +36,27 @@ class FireInputController: IMKInputController {
         let location: Int?
         // NSRange 以 UTF-16 单元计，代理对(emoji等)会让 count 与实际长度不一致
         var utf16Length: Int { text.utf16.count }
+        /// 学习系统的纠错回退信息（rank ≥ 1 的显式选择才有）
+        let learning: CommitLearningInfo?
+        /// 该条文字是否已实时写入通道 B（上屏时学习开启且含中文）。
+        /// 撤销据此决定是否发 commitUndone，保证负样本与实时学习严格对账：
+        /// 学习关闭期间上屏的记录撤销时不产生虚假的计数回退
+        let wasLearned: Bool
     }
+
+    /// 学习信号：显式选择非首选时记录的纠错上下文，
+    /// 随 CommittedRecord 入撤销栈，撤销时一并回退学习计数
+    struct CommitLearningInfo {
+        let rank: Int
+        let top1Text: String
+        let code: String
+        let ctx: String
+    }
+
+    /// 整句候选全量可见列表（学习信号取 rank/被弃首选用；_candidates 只装当前页）
+    private var _sentenceAllCandidates: [Candidate] = []
+    /// 待随下一次 insertText 入撤销栈的学习信息（insertCandidate 设置，insertText 消费）
+    private var _pendingCommitLearning: CommitLearningInfo?
     private var _lastInputText = ""
     // 待二次确认删除的候选词，非 nil 时候选窗处于删除确认态
     private var _pendingDeleteCandidate: Candidate?
@@ -806,7 +826,9 @@ class FireInputController: IMKInputController {
                         userInfo: ["candidate": candidate,
                                   "appBundleId": client()?.bundleIdentifier() ?? "",
                                   // 自动上屏无提交键，键数 = 实际消耗的编码长度
-                                  "keyCount": max(1, code.count)]),
+                                  "keyCount": max(1, code.count),
+                                  // 自动上屏恒为首选：学习信号记 rank 0（通道 B 记账用）
+                                  "rank": 0, "top1Text": "", "rawCode": code, "ctx": ""]),
             postingStyle: .whenIdle)
     }
 
@@ -1158,6 +1180,30 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                     // Tab/方向键在页内循环高亮
                     let all = result.candidates
                     _sentenceTotalCount = all.count
+                    // 全量可见列表（学习信号按它取 rank 与被弃首选；
+                    // 顺序与用户所见一致：用户短语在首页首组，其余整句候选接后）
+                    // 「显示打分」开启时附带各维度加权得分串
+                    let scoreEnabled = Defaults[.enableSentenceScore]
+                    let allSentenceCandidates = all.map { completed in
+                        Candidate(code: completed.segmented.isEmpty ? _originalString : completed.segmented,
+                                  text: completed.text,
+                                  type: .sentence,
+                                  scoreText: scoreEnabled ? completed.dimensions.displayText() : nil)
+                    }
+                    if userMatches.isEmpty {
+                        _sentenceAllCandidates = allSentenceCandidates
+                    } else {
+                        var byText: [String: Candidate] = [:]
+                        for c in allSentenceCandidates { byText[c.text] = c }
+                        var fullVisible: [Candidate] = []
+                        if curPage == 1 {
+                            for user in userMatches {
+                                fullVisible.append(byText[user.text] ?? user)
+                            }
+                        }
+                        fullVisible.append(contentsOf: allSentenceCandidates.filter { !userTexts.contains($0.text) })
+                        _sentenceAllCandidates = fullVisible
+                    }
                     let pageSize = max(1, Defaults[.candidateCount])
                     let pageCount = max(1, (all.count + pageSize - 1) / pageSize)
                     if curPage > pageCount { curPage = pageCount }
@@ -1166,7 +1212,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                     let pageCandidates = pageItems.map { completed in
                         Candidate(code: completed.segmented.isEmpty ? _originalString : completed.segmented,
                                   text: completed.text,
-                                  type: .sentence)
+                                  type: .sentence,
+                                  scoreText: scoreEnabled ? completed.dimensions.displayText() : nil)
                     }
                     var list: [Candidate]
                     if userMatches.isEmpty {
@@ -1314,6 +1361,30 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
     func insertCandidate(_ candidate: Candidate, committedKeys: Int? = nil) {
         // insertText 内部 clean() 会清空 _originalString，键数必须先取
         let keys = max(1, committedKeys ?? (_originalString.count + 1))
+        // 学习信号（clean() 会重置会话与 _sentenceActive，全部先捕获）：
+        // rawCode = 本次上屏的原始编码；ctx = 上屏前的会话上下文末 2 字；
+        // rank = 可见候选列表中的命中序号（0 = 首选）；top1Text = 被放弃的首选
+        let rawCode = _originalString
+        let ctxText = _sentenceSession.contextText
+        var rank = 0
+        var top1Text = ""
+        if _sentenceActive, !_sentenceAllCandidates.isEmpty {
+            top1Text = _sentenceAllCandidates[0].text
+            if let index = _sentenceAllCandidates.firstIndex(where: { $0.text == candidate.text }) {
+                rank = index
+            }
+        } else if !_candidates.isEmpty {
+            top1Text = _candidates[0].text
+            if let index = _candidates.firstIndex(where: {
+                $0.text == candidate.text && $0.code == candidate.code
+            }) {
+                rank = index
+            }
+        }
+        if rank >= 1, Defaults[.enableLearning] {
+            _pendingCommitLearning = CommitLearningInfo(
+                rank: rank, top1Text: top1Text, code: rawCode, ctx: ctxText)
+        }
         Fire.shared.lastCommittedText = candidate.text
         // 记录中文候选词上屏，供"快速加词"组词使用
         if candidate.type != .placeholder, candidate.text.contains(where: { $0.isChineseChar }) {
@@ -1331,7 +1402,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         let notification = Notification(
             name: Fire.candidateInserted,
             object: nil,
-            userInfo: [ "candidate": candidate, "appBundleId": appBundleId, "keyCount": keys ]
+            userInfo: [ "candidate": candidate, "appBundleId": appBundleId, "keyCount": keys,
+                        "rank": rank, "top1Text": top1Text, "rawCode": rawCode, "ctx": ctxText ]
         )
         // 异步派发事件，防止阻塞当前线程
         NotificationQueue.default.enqueue(notification, postingStyle: .whenIdle)
@@ -1379,7 +1451,17 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             _lastInputIsNumber = newText.last != nil && Int(String(newText.last!)) != nil
             _lastPunctuationKeyCode = nil
             _lastCommittedText = newText
-            _committedRecords.append(CommittedRecord(text: newText, location: insertionLocation))
+            // 通道 A：会话缓存记录（所有真实插入文档的文字，跨 clean 存活）
+            if Defaults[.enableSentenceMode] {
+                _sentenceSession.decoder.cacheModel.record(newText)
+            }
+            // 与 LearnerCenter.applyCommit 同口径：学习开启且含中文才算实时学过
+            let wasLearned = Defaults[.enableLearning]
+                && newText.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) }
+            _committedRecords.append(CommittedRecord(
+                text: newText, location: insertionLocation,
+                learning: _pendingCommitLearning, wasLearned: wasLearned))
+            _pendingCommitLearning = nil
             if _committedRecords.count > Self.maxUndoDepth {
                 _committedRecords.removeFirst(_committedRecords.count - Self.maxUndoDepth)
             }
@@ -1535,6 +1617,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         _sentenceHighlightIndex = 0
         _sentenceTotalCount = 0
         _pageCount = 0
+        _sentenceAllCandidates = []
+        _pendingCommitLearning = nil
         // 整句会话整体重置（空格/回车/Esc/上屏都走到这里）
         SentenceEngine.shared.resetSession(_sentenceSession)
         CandidatesWindow.shared.close()
@@ -1596,9 +1680,11 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
     }
 
     /// 清空上屏撤销记录（切换输入框/客户端时调用），
-    /// 避免在新输入框里误撤销上一个输入框中上屏的文字
+    /// 避免在新输入框里误撤销上一个输入框中上屏的文字；
+    /// 会话缓存同步清空（新输入框 = 新主题）
     func clearCommitUndoRecords() {
         _committedRecords.removeAll()
+        _sentenceSession.decoder.cacheModel.clear()
     }
 
     /// 撤消上屏：回退最近一次上屏的文字（Ctrl+U 默认）。
@@ -1658,6 +1744,26 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         }
         _committedRecords.removeLast()
         _lastCommittedText = _committedRecords.last?.text ?? ""
+        // 学习系统负样本：仅当该条文字实时学过（与 statistics.learned 同口径）
+        // 才回退——通道 B 计数回退、纠错对回退；会话缓存窗口始终回退
+        if record.wasLearned || record.learning != nil {
+            var userInfo: [AnyHashable: Any] = [
+                "text": text,
+                "appBundleId": client()?.bundleIdentifier() ?? ""
+            ]
+            if let learning = record.learning {
+                userInfo["rank"] = learning.rank
+                userInfo["top1Text"] = learning.top1Text
+                userInfo["code"] = learning.code
+                userInfo["ctx"] = learning.ctx
+            }
+            NotificationQueue.default.enqueue(
+                Notification(name: Fire.commitUndone, object: nil, userInfo: userInfo),
+                postingStyle: .whenIdle)
+        }
+        if Defaults[.enableSentenceMode] {
+            _sentenceSession.decoder.cacheModel.removeLast(text)
+        }
                 // 撤销的是整句上屏的文字时，同步弹出对应的 n-gram 留存段
         if Defaults[.enableSentenceMode],
            let last = _sentenceSession.contextSegments.last,

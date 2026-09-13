@@ -90,6 +90,39 @@ struct SentenceEdge {
     var optimalSingle: Bool = false
 }
 
+/// 打分维度拆解（候选栏「显示打分」用）。各项之和恒等于候选的 score。
+struct SentenceScoreDimensions {
+    /// 通用ngram：通用模型逐字 logp + 结尾 EOS logp
+    var generalNgram: Double = 0
+    /// 用户ngram：学习通道 B 插值相对通用模型的增量（含 EOS）
+    var userNgram: Double = 0
+    /// 会话缓存：学习通道 A 加分
+    var sessionCache: Double = 0
+    /// 加权词：supplement 匹配奖励
+    var supplement: Double = 0
+    /// 纠错：学习通道 C1 纠错对加分
+    var correction: Double = 0
+    /// 组句项：出字奖励、词库序轻罚、整码单字奖励等 beam 结构项
+    var structural: Double = 0
+
+    /// 候选栏打分串：非零维度按固定顺序拼接（两位小数，正值带 + 号）
+    func displayText() -> String {
+        var parts: [String] = []
+        func append(_ label: String, _ value: Double) {
+            guard abs(value) >= 0.005 else { return }
+            let sign = value < 0 ? "" : "+"
+            parts.append("\(label):\(sign)\(String(format: "%.2f", value))")
+        }
+        append("通用ngram", generalNgram)
+        append("用户ngram", userNgram)
+        append("会话缓存", sessionCache)
+        append("加权词", supplement)
+        append("纠错", correction)
+        append("组句项", structural)
+        return parts.joined(separator: " ")
+    }
+}
+
 /// 解码输出候选。path 链回溯出分段码。
 final class SentenceCompleted {
     var score: Double
@@ -101,10 +134,13 @@ final class SentenceCompleted {
     let rawLength: Int
     let path: SentenceState
     var segmented: String
+    /// 各维度得分拆解（与 score 同步累计）
+    var dimensions: SentenceScoreDimensions
 
     init(score: Double, confidenceScore: Double, text: String,
          supplementScore: Double, maxRank: Int, edgeCount: Int,
-         rawLength: Int, path: SentenceState, segmented: String = "") {
+         rawLength: Int, path: SentenceState, segmented: String = "",
+         dimensions: SentenceScoreDimensions = SentenceScoreDimensions()) {
         self.score = score
         self.confidenceScore = confidenceScore
         self.text = text
@@ -114,6 +150,7 @@ final class SentenceCompleted {
         self.rawLength = rawLength
         self.path = path
         self.segmented = segmented
+        self.dimensions = dimensions
     }
 }
 

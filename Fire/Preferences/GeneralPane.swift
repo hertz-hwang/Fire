@@ -30,6 +30,7 @@ struct GeneralPane: View {
     @Default(.zKeyQuery) private var zKeyQuery
     @Default(.zKeyRepeat) private var zKeyRepeat
     @Default(.enableSentenceMode) private var enableSentenceMode
+    @Default(.enableSentenceScore) private var enableSentenceScore
     @Default(.enableSentenceAutoCommit) private var enableSentenceAutoCommit
     @Default(.enableSentenceAllowDuplicateSingle) private var enableSentenceAllowDuplicateSingle
     @Default(.sentenceContextDepth) private var sentenceContextDepth
@@ -181,6 +182,10 @@ struct GeneralPane: View {
                                     // 拼音方案强制整句：勾选锁定不可改；
                                     // 所选码表无配套整句码表（五笔86/98 等）：不可勾选
                                     .disabled(isPinyin || !sentenceAvailableForTable)
+                                if enableSentenceMode {
+                                    Toggle("显示打分", isOn: $enableSentenceScore)
+                                        .help("在各整句候选末尾显示各维度加权得分（通用ngram、用户ngram等），颜色/字号/加粗可在主题 JSON 中配置")
+                                }
                                 Spacer(minLength: 50)
                             }
                             HStack {

@@ -130,6 +130,9 @@ struct ApperanceThemeConfig: Codable {
     let windowPaddingRight: Float
     let windowPaddingBottom: Float
     let windowBorderRadius: Float
+    // 窗口描边。可缺省：老主题 JSON 升级后不画边框（宽度回落 0）
+    let windowBorderWidth: Float?
+    let windowBorderColor: ColorData?
 
     let originCodeColor: ColorData
     let originCandidatesSpace: Float
@@ -150,6 +153,11 @@ struct ApperanceThemeConfig: Codable {
     // 页面指示器置灰色
     let pageIndicatorDisabledColor: ColorData
 
+    // 整句打分显示样式（候选末尾）。可缺省：老主题 JSON 升级后回落默认样式
+    let candidateScoreColor: ColorData?
+    let candidateScoreFontSize: Float?
+    let candidateScoreBold: Bool?
+
     let fontName: String
     let fontSize: Float
     // 序号字号。可缺省
@@ -162,11 +170,13 @@ struct ApperanceThemeConfig: Codable {
     private enum CodingKeys: String, CodingKey {
         case windowBackgroundColor, windowPaddingTop, windowPaddingLeft
         case windowPaddingRight, windowPaddingBottom, windowBorderRadius
+        case windowBorderWidth, windowBorderColor
         case originCodeColor, originCandidatesSpace, candidateSpace
         case candidateIndexColor, candidateTextColor, candidateCodeColor
         case selectedIndexColor, selectedTextColor, selectedCodeColor
         case selectedBackgroundColor
         case pageIndicatorColor, pageIndicatorDisabledColor
+        case candidateScoreColor, candidateScoreFontSize, candidateScoreBold
         case fontName, fontSize
         case candidateIndexFontSize, candidateCodeFontSize, candidateRowPadding
     }
@@ -177,12 +187,17 @@ struct ApperanceThemeConfig: Codable {
         windowPaddingTop: Float, windowPaddingLeft: Float,
         windowPaddingRight: Float, windowPaddingBottom: Float,
         windowBorderRadius: Float,
+        windowBorderWidth: Float? = nil,
+        windowBorderColor: ColorData? = nil,
         originCodeColor: ColorData,
         originCandidatesSpace: Float, candidateSpace: Float,
         candidateIndexColor: ColorData, candidateTextColor: ColorData, candidateCodeColor: ColorData,
         selectedIndexColor: ColorData, selectedTextColor: ColorData, selectedCodeColor: ColorData,
         selectedBackgroundColor: ColorData? = nil,
         pageIndicatorColor: ColorData, pageIndicatorDisabledColor: ColorData,
+        candidateScoreColor: ColorData? = nil,
+        candidateScoreFontSize: Float? = nil,
+        candidateScoreBold: Bool? = nil,
         fontName: String, fontSize: Float,
         candidateIndexFontSize: Float? = nil,
         candidateCodeFontSize: Float? = nil,
@@ -194,6 +209,8 @@ struct ApperanceThemeConfig: Codable {
         self.windowPaddingRight = windowPaddingRight
         self.windowPaddingBottom = windowPaddingBottom
         self.windowBorderRadius = windowBorderRadius
+        self.windowBorderWidth = windowBorderWidth
+        self.windowBorderColor = windowBorderColor
         self.originCodeColor = originCodeColor
         self.originCandidatesSpace = originCandidatesSpace
         self.candidateSpace = candidateSpace
@@ -206,6 +223,9 @@ struct ApperanceThemeConfig: Codable {
         self.selectedBackgroundColor = selectedBackgroundColor
         self.pageIndicatorColor = pageIndicatorColor
         self.pageIndicatorDisabledColor = pageIndicatorDisabledColor
+        self.candidateScoreColor = candidateScoreColor
+        self.candidateScoreFontSize = candidateScoreFontSize
+        self.candidateScoreBold = candidateScoreBold
         self.fontName = fontName
         self.fontSize = fontSize
         self.candidateIndexFontSize = candidateIndexFontSize
@@ -222,6 +242,8 @@ struct ApperanceThemeConfig: Codable {
             windowPaddingRight: try container.decode(Float.self, forKey: .windowPaddingRight),
             windowPaddingBottom: try container.decode(Float.self, forKey: .windowPaddingBottom),
             windowBorderRadius: try container.decode(Float.self, forKey: .windowBorderRadius),
+            windowBorderWidth: try container.decodeIfPresent(Float.self, forKey: .windowBorderWidth),
+            windowBorderColor: try container.decodeIfPresent(ColorData.self, forKey: .windowBorderColor),
             originCodeColor: try container.decode(ColorData.self, forKey: .originCodeColor),
             originCandidatesSpace: try container.decode(Float.self, forKey: .originCandidatesSpace),
             candidateSpace: try container.decode(Float.self, forKey: .candidateSpace),
@@ -234,6 +256,9 @@ struct ApperanceThemeConfig: Codable {
             selectedBackgroundColor: try container.decodeIfPresent(ColorData.self, forKey: .selectedBackgroundColor),
             pageIndicatorColor: try container.decode(ColorData.self, forKey: .pageIndicatorColor),
             pageIndicatorDisabledColor: try container.decode(ColorData.self, forKey: .pageIndicatorDisabledColor),
+            candidateScoreColor: try container.decodeIfPresent(ColorData.self, forKey: .candidateScoreColor),
+            candidateScoreFontSize: try container.decodeIfPresent(Float.self, forKey: .candidateScoreFontSize),
+            candidateScoreBold: try container.decodeIfPresent(Bool.self, forKey: .candidateScoreBold),
             fontName: try container.decode(String.self, forKey: .fontName),
             fontSize: try container.decode(Float.self, forKey: .fontSize),
             candidateIndexFontSize: try container.decodeIfPresent(Float.self, forKey: .candidateIndexFontSize),
@@ -254,6 +279,20 @@ extension ApperanceThemeConfig {
     var codeFontSize: Float { candidateCodeFontSize ?? 12 }
     /// 候选行内上下留白
     var rowPadding: Float { candidateRowPadding ?? 4 }
+    /// 窗口描边线宽（0 = 不画边框）
+    var borderLineWidth: Float { windowBorderWidth ?? 0 }
+    /// 窗口描边颜色
+    var windowBorderColorValue: ColorData {
+        windowBorderColor ?? ColorData(red: 0, green: 0, blue: 0, opacity: 0)
+    }
+    /// 打分显示颜色：紫色（默认主题深浅模式各配了更合适的紫色，此处兜底老主题）
+    var scoreColor: ColorData {
+        candidateScoreColor ?? ColorData(red: 0xAF/255.0, green: 0x52/255.0, blue: 0xDE/255.0, opacity: 1)
+    }
+    /// 打分字号
+    var scoreFontSize: Float { candidateScoreFontSize ?? 11 }
+    /// 打分加粗
+    var scoreBold: Bool { candidateScoreBold ?? true }
 }
 
 struct ThemeConfig: Codable, Defaults.Serializable {
@@ -304,6 +343,9 @@ let defaultThemeConfig = ThemeConfig(
         selectedBackgroundColor: ColorData(red: 0, green: 0.48, blue: 1, opacity: 0.16),
         pageIndicatorColor: ColorData(red: 0xA0/255.0, green: 0xA0/255.0, blue: 0xA6/255.0, opacity: 1),
         pageIndicatorDisabledColor: ColorData(red: 0xA0/255.0, green: 0xA0/255.0, blue: 0xA6/255.0, opacity: 0.4),
+        candidateScoreColor: ColorData(red: 0xAF/255.0, green: 0x52/255.0, blue: 0xDE/255.0, opacity: 1),
+        candidateScoreFontSize: 11,
+        candidateScoreBold: true,
         fontName: "system",
         fontSize: 16,
         candidateIndexFontSize: 11,
@@ -328,6 +370,9 @@ let defaultThemeConfig = ThemeConfig(
         selectedBackgroundColor: ColorData(red: 0, green: 0.48, blue: 1, opacity: 0.16),
         pageIndicatorColor: ColorData(red: 0x8E/255.0, green: 0x8E/255.0, blue: 0x93/255.0, opacity: 1),
         pageIndicatorDisabledColor: ColorData(red: 0x8E/255.0, green: 0x8E/255.0, blue: 0x93/255.0, opacity: 0.4),
+        candidateScoreColor: ColorData(red: 0xBF/255.0, green: 0x5A/255.0, blue: 0xF2/255.0, opacity: 1),
+        candidateScoreFontSize: 11,
+        candidateScoreBold: true,
         fontName: "system",
         fontSize: 16,
         candidateIndexFontSize: 11,
@@ -347,10 +392,64 @@ func migrateDefaultThemeIfNeeded() {
     }
 }
 
+/// 去掉主题 JSON 里的注释（`//` 行注释与 `/* */` 块注释，JSONC 风格），
+/// 主题文件允许带注释编写，导入/预览前统一剥离。
+/// 逐字符扫描并跟踪引号与转义状态，字符串值里的 `//`（如路径）不受影响；
+/// 块注释内的换行予以保留，让解码报错的行号尽量与原文件对齐。
+private func stripJSONComments(_ source: String) -> String {
+    var result = String()
+    result.reserveCapacity(source.count)
+    let chars = Array(source)
+    var inString = false
+    var escaped = false
+    var i = 0
+    while i < chars.count {
+        let ch = chars[i]
+        if inString {
+            result.append(ch)
+            if escaped {
+                escaped = false
+            } else if ch == "\\" {
+                escaped = true
+            } else if ch == "\"" {
+                inString = false
+            }
+            i += 1
+            continue
+        }
+        if ch == "\"" {
+            inString = true
+            result.append(ch)
+            i += 1
+            continue
+        }
+        if ch == "/", i + 1 < chars.count {
+            if chars[i + 1] == "/" {
+                i += 2
+                while i < chars.count, chars[i] != "\n" { i += 1 }
+                continue
+            }
+            if chars[i + 1] == "*" {
+                i += 2
+                while i + 1 < chars.count, !(chars[i] == "*" && chars[i + 1] == "/") {
+                    if chars[i] == "\n" { result.append("\n") }
+                    i += 1
+                }
+                i += 2
+                continue
+            }
+        }
+        result.append(ch)
+        i += 1
+    }
+    return result
+}
+
 func loadThemeConfig(jsonData: String) -> ThemeConfig? {
     let decoder = JSONDecoder()
     do {
-        return try decoder.decode(ThemeConfig.self, from: jsonData.data(using: .utf8)!)
+        let cleaned = stripJSONComments(jsonData)
+        return try decoder.decode(ThemeConfig.self, from: cleaned.data(using: .utf8)!)
     } catch {
         print(error)
         return nil
