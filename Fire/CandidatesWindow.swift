@@ -71,7 +71,10 @@ class CandidatesWindow: NSWindow, NSWindowDelegate {
         let events: [NotificationObserver] = [
             (CandidatesView.candidateSelected, { notification in
                 if let candidate = notification.userInfo?["candidate"] as? Candidate {
-                    self.inputController?.insertCandidate(candidate)
+                    // 鼠标点选不是按键，无提交键，只计已敲入的编码键数
+                    self.inputController?.insertCandidate(
+                        candidate,
+                        committedKeys: self.inputController?.currentRawKeyCount ?? 0)
                 }
             }),
             (CandidatesView.prevPageBtnTapped, { _ in self.inputController?.prevPage() }),

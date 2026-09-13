@@ -115,10 +115,11 @@ class Statistics {
         }
         if candidate.type == CandidateType.placeholder { return }
         let appBundleId = notification.userInfo?["appBundleId"] as? String ?? ""
-        let sql = "insert into data(text, type, code, createdAt, appBundleId) values (:text, :type, :code, :createdAt, :appBundleId)"
+        let sql = "insert into data(text, type, code, createdAt, appBundleId, keyCount) values (:text, :type, :code, :createdAt, :appBundleId, :keyCount)"
         var insertStatement: OpaquePointer?
         if sqlite3_prepare_v2(database, sql, -1, &insertStatement, nil) == SQLITE_OK {
             let format = Statistics.insertDateFormatter
+            let keyCount = (notification.userInfo?["keyCount"] as? Int) ?? 0
             sqlite3_bind_text(insertStatement,
                               sqlite3_bind_parameter_index(insertStatement, ":text"),
                               candidate.text, -1, SQLITE_TRANSIENT)
@@ -134,6 +135,9 @@ class Statistics {
             sqlite3_bind_text(insertStatement,
                               sqlite3_bind_parameter_index(insertStatement, ":appBundleId"),
                               appBundleId, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int(insertStatement,
+                             sqlite3_bind_parameter_index(insertStatement, ":keyCount"),
+                             Int32(max(0, keyCount)))
 
             if sqlite3_step(insertStatement) == SQLITE_DONE {
                 sqlite3_finalize(insertStatement)
@@ -423,12 +427,25 @@ class Statistics {
     /// 注意：
     /// 1. createdAt 以本地时区写入，`date('now')` 是 UTC，必须用
     ///    `date('now','localtime')`，否则东八区清晨查"今日"匹配的是昨天的数据。
-    /// 2. 整句候选入库的 code 是候选栏展示用的分段码（如 "ni hao shi jie"），
-    ///    段间空格不是实际键入的编码，统计码长时须剔除。
+    /// 2. 平均码长 = 总按键数 / 总上屏字数（按字加权），而非按上屏次数平均——
+    ///    整句一次上屏 7 个字的权重应是一个字的 7 倍。
+    ///    按键数取 keyCount（入库时记录的真实按键数：编码串 + 空格/数字等
+    ///    提交键；整句自动上屏无提交键，只计消耗的编码键）。
+    /// 3. 旧数据没有 keyCount，只能估算：常规上屏按"编码长 + 1"（默认空格
+    ///    上屏口径）；整句自动上屏（type=sentence 且 code 无分段空格）没有
+    ///    提交键，按纯编码长估算。整句候选入库的 code 是候选栏展示用的
+    ///    分段码（如 "ni hao shi jie"），段间空格不是实际键入的编码，须剔除。
     private func queryTodayMetrics() -> (Int64, Double) {
         let commitSQL = "SELECT COUNT(*) FROM data WHERE date(createdAt) = date('now', 'localtime')"
         let avgSQL = """
-            SELECT COALESCE(AVG(LENGTH(REPLACE(code, ' ', ''))), 0) FROM data
+            SELECT COALESCE(
+                SUM(CASE
+                        WHEN keyCount > 0 THEN keyCount
+                        WHEN type = 'sentence' AND code NOT LIKE '% %'
+                            THEN LENGTH(REPLACE(code, ' ', ''))
+                        ELSE LENGTH(REPLACE(code, ' ', '')) + 1
+                    END) * 1.0 / NULLIF(SUM(LENGTH(text)), 0), 0)
+            FROM data
             WHERE date(createdAt) = date('now', 'localtime') AND code != ''
         """
         let commits = singleInt64(sql: commitSQL)
@@ -875,6 +892,8 @@ class Statistics {
         let code: String
         let createdAt: String
         let appBundleId: String?
+        // 真实按键数；旧版本备份无此字段，解码为 nil 后按 0（未知）处理
+        let keyCount: Int?
     }
 
     struct Backup: Codable {
@@ -884,7 +903,7 @@ class Statistics {
     }
 
     func backup(to url: URL) throws {
-        let sql = "SELECT text, type, code, createdAt, appBundleId FROM data ORDER BY id ASC"
+        let sql = "SELECT text, type, code, createdAt, appBundleId, keyCount FROM data ORDER BY id ASC"
         var stmt: OpaquePointer?
         var records: [Record] = []
         if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
@@ -894,7 +913,8 @@ class Statistics {
                     type: String(cString: sqlite3_column_text(stmt, 1)),
                     code: String(cString: sqlite3_column_text(stmt, 2)),
                     createdAt: String(cString: sqlite3_column_text(stmt, 3)),
-                    appBundleId: sqlite3_column_text(stmt, 4).map { String(cString: $0) }
+                    appBundleId: sqlite3_column_text(stmt, 4).map { String(cString: $0) },
+                    keyCount: Int(sqlite3_column_int(stmt, 5))
                 ))
             }
         }
@@ -910,7 +930,7 @@ class Statistics {
         if !merge {
             sqlite3_exec(database, "DELETE FROM data", nil, nil, nil)
         }
-        let sql = "INSERT INTO data(text, type, code, createdAt, appBundleId) VALUES (:text, :type, :code, :createdAt, :appBundleId)"
+        let sql = "INSERT INTO data(text, type, code, createdAt, appBundleId, keyCount) VALUES (:text, :type, :code, :createdAt, :appBundleId, :keyCount)"
         sqlite3_exec(database, "BEGIN TRANSACTION", nil, nil, nil)
         for record in payload.data {
             var stmt: OpaquePointer?
@@ -920,6 +940,7 @@ class Statistics {
                 sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":code"), record.code, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":createdAt"), record.createdAt, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":appBundleId"), record.appBundleId ?? "", -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int(stmt, sqlite3_bind_parameter_index(stmt, ":keyCount"), Int32(record.keyCount ?? 0))
                 sqlite3_step(stmt)
             }
             sqlite3_finalize(stmt)
@@ -1037,7 +1058,8 @@ class Statistics {
             "createdAt" TEXT NOT NULL DEFAULT (datetime('now'))
         )
         """,
-        "ALTER TABLE data ADD COLUMN appBundleId TEXT NOT NULL DEFAULT ''"
+        "ALTER TABLE data ADD COLUMN appBundleId TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE data ADD COLUMN keyCount INTEGER NOT NULL DEFAULT 0"
     ]
 
     private func getVersion() -> Int32 {

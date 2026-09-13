@@ -74,7 +74,8 @@ class FireInputController: IMKInputController {
         _autoCommitTimer?.cancel()
         let item = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            self.insertCandidate(candidate)
+            // 定时上屏无提交键，消耗的键数即候选编码长度
+            self.insertCandidate(candidate, committedKeys: candidate.code.count)
         }
         _autoCommitTimer = item
         DispatchQueue.main.asyncAfter(deadline: .now() + Defaults[.emptyCodeDirectDelay], execute: item)
@@ -797,7 +798,9 @@ class FireInputController: IMKInputController {
             Notification(name: Fire.candidateInserted,
                         object: nil,
                         userInfo: ["candidate": candidate,
-                                  "appBundleId": client()?.bundleIdentifier() ?? ""]),
+                                  "appBundleId": client()?.bundleIdentifier() ?? "",
+                                  // 自动上屏无提交键，键数 = 实际消耗的编码长度
+                                  "keyCount": max(1, code.count)]),
             postingStyle: .whenIdle)
     }
 
@@ -1271,7 +1274,16 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         return NSRange(location: 0, length: _originalString.count)
     }
 
-    func insertCandidate(_ candidate: Candidate) {
+    /// 候选窗鼠标点选上屏用：点选无提交键，只计已敲入的编码键数
+    var currentRawKeyCount: Int { _originalString.count }
+
+    /// 上屏候选并计入统计。
+    /// committedKeys：本次上屏消耗的真实按键数，用于"平均码长 = 总键数/总字数"。
+    /// 手动选择（空格/数字/;/标点提交）不传，按"编码串 + 1 个提交键"计；
+    /// 顶屏/定时等自动上屏没有提交键，由调用方传入实际消耗的编码键数。
+    func insertCandidate(_ candidate: Candidate, committedKeys: Int? = nil) {
+        // insertText 内部 clean() 会清空 _originalString，键数必须先取
+        let keys = max(1, committedKeys ?? (_originalString.count + 1))
         Fire.shared.lastCommittedText = candidate.text
         // 记录中文候选词上屏，供"快速加词"组词使用
         if candidate.type != .placeholder, candidate.text.contains(where: { $0.isChineseChar }) {
@@ -1289,7 +1301,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         let notification = Notification(
             name: Fire.candidateInserted,
             object: nil,
-            userInfo: [ "candidate": candidate, "appBundleId": appBundleId ]
+            userInfo: [ "candidate": candidate, "appBundleId": appBundleId, "keyCount": keys ]
         )
         // 异步派发事件，防止阻塞当前线程
         NotificationQueue.default.enqueue(notification, postingStyle: .whenIdle)
@@ -1375,7 +1387,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                     clean()
                     return true
                 } else if _candidates.count == 1 {
-                    insertCandidate(first)
+                    // 唯一候选满码自动上屏，无提交键
+                    insertCandidate(first, committedKeys: count)
                     return true
                 }
             }
@@ -1389,7 +1402,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                     let prefix = String(_originalString.dropLast())
                     let (candidates, _) = Fire.shared.getCandidates(origin: prefix, page: 1)
                     if let candidate = candidates.first, candidate.type != .placeholder {
-                        insertCandidate(candidate)
+                        // 空码顶字：末键是下一码首键，本屏只消耗前缀键
+                        insertCandidate(candidate, committedKeys: count - 1)
                         _originalString = lastChar
                         return true
                     }
@@ -1408,7 +1422,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                     let (prefixCandidates, _) = Fire.shared.getCandidates(origin: prefix, page: 1)
                     if let prefixFirst = prefixCandidates.first, prefixFirst.type != .placeholder,
                        prefixFirst.code == prefix {
-                        insertCandidate(prefixFirst)
+                        // 空码直接上屏的顶屏：末键是下一码首键，本屏只消耗前缀键
+                        insertCandidate(prefixFirst, committedKeys: count - 1)
                         _originalString = lastChar
                         return true
                     }
@@ -1420,7 +1435,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             }
             if first.code == _originalString {
                 if _candidates.count == 1 {
-                    insertCandidate(first)
+                    // 唯一候选完整编码自动上屏，无提交键
+                    insertCandidate(first, committedKeys: count)
                     return true
                 }
                 // 完整编码有多个候选且编码长度 > 1：300ms 后自动上屏首选
@@ -1443,7 +1459,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         let remaining = String(_originalString.dropFirst(prefixLength))
         let (candidates, _) = Fire.shared.getCandidates(origin: prefix, page: 1)
         guard let candidate = candidates.first, candidate.type != .placeholder else { return false }
-        insertCandidate(candidate)
+        // 顶屏无提交键：本屏消耗前缀 prefixLength 键，其余键留给下一码
+        insertCandidate(candidate, committedKeys: prefixLength)
         _originalString = remaining
         return true
     }
