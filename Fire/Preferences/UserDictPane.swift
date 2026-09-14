@@ -7,7 +7,6 @@
 //
 
 import SwiftUI
-import Settings
 import Combine
 import UniformTypeIdentifiers
 
@@ -29,6 +28,7 @@ class UserDictTextModel: ObservableObject {
     }
 }
 
+/// 用户词库面板：迁移至原生 Form(.grouped)，与侧边栏风格首选项配套
 struct UserDictPane: View {
     @StateObject private var userDictTextModel = UserDictTextModel()
 
@@ -58,47 +58,44 @@ struct UserDictPane: View {
     }
 
     var body: some View {
-        Settings.Container(contentWidth: 450) {
-            Settings.Section(title: "") {
-                Text("用户词库")
-                if #available(macOS 11.0, *) {
-                    TextEditor(text: $userDictTextModel.text)
-                        .font(Font.custom("Monaco", size: 14))
-                        .frame(height: 400)
-                        .lineSpacing(6)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4)
-                                .stroke(Color(NSColor.separatorColor), lineWidth: 1)
-                        )
+        Form {
+            Section {
+                TextEditor(text: $userDictTextModel.text)
+                    .font(Font.custom("Monaco", size: 14))
+                    .frame(minHeight: 260)
+                    .lineSpacing(6)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+                    )
+                VStack(alignment: .leading, spacing: 4) {
                     Text("1. 编码需在行首")
-                        .font(Font.system(size: 12))
                     Text("2. 编码和候选项之间需用空格分隔")
-                        .font(Font.system(size: 12))
                     Text("3. 可以有多个候选项，每个候选项使用空格分隔")
-                        .font(Font.system(size: 12))
                     Text("4. 候选项可使用{yyyy}/{MM}/{dd}/{HH}/{mm}/{ss}代替当前年/月/日/时/分/秒")
-                        .font(Font.system(size: 12))
                     Text("5. 行首可加权重：「[权重] 编码 词条1 词条2 ……」（权重省略时默认1000）。整句模式下，带权重词条按权重提升组句得分，用于新词/流行词/个人常用词；「权重 词条」（无编码）只参与整句加权，不出普通候选")
-                        .font(Font.system(size: 12))
                         .fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        Button("导入") {
-                            importDict()
-                        }
-                        Button("导出") {
-                            exportDict()
-                        }
-                        Spacer()
-                        Button("保存") {
-                            DictManager.shared.updateUserDict(userDictTextModel.text)
-                        }
-                    }
-                } else {
-                    // Fallback on earlier versions
-                    Text("暂不支持，请升级系统至11.0及以上")
                 }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                HStack {
+                    Button("导入") {
+                        importDict()
+                    }
+                    Button("导出") {
+                        exportDict()
+                    }
+                    Spacer()
+                    Button("保存") {
+                        DictManager.shared.updateUserDict(userDictTextModel.text)
+                    }
+                    .keyboardShortcut("s", modifiers: .command)
+                }
+            } header: {
+                Text("用户词库")
             }
         }
+        .formStyle(.grouped)
     }
 }
 

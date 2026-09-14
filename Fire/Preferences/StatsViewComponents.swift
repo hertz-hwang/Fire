@@ -644,7 +644,8 @@ struct InputDetailsView: View {
                     Text("用户词").tag("user")
                 }
                 .pickerStyle(.segmented)
-                .frame(maxWidth: 280)
+                .labelsHidden()
+                .fixedSize()
                 if let hour = model.hourFilter {
                     hourFilterChip(hour: hour)
                 }
@@ -896,7 +897,19 @@ final class InputDetailsModel: ObservableObject {
     }
 }
 
-// MARK: - 5. 用户词频
+// MARK: - 5. 用户词频 / 用户字频
+
+/// 字词频率模式：词频按整条上屏记录聚合；字频把记录拆成单字后聚合
+enum WordFrequencyMode {
+    case word
+    case char
+
+    var title: String { self == .word ? "用户词频" : "用户字频" }
+    var searchTextPlaceholder: String { self == .word ? "搜索字词" : "搜索单字" }
+    var textColumnTitle: String { self == .word ? "字词" : "字" }
+    var emptyHint: String { self == .word ? "暂无匹配词频数据" : "暂无匹配字频数据" }
+    var exportFileName: String { self == .word ? "用户词频.csv" : "用户字频.csv" }
+}
 
 /// 应用筛选下拉项
 struct WordFrequencyAppOption: Hashable, Identifiable {
@@ -913,6 +926,8 @@ struct WordFrequencyAppOption: Hashable, Identifiable {
 struct WordFrequencyView: View {
     @ObservedObject var model: WordFrequencyModel
 
+    private var mode: WordFrequencyMode { model.mode }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
@@ -924,13 +939,14 @@ struct WordFrequencyView: View {
                 paginationBar
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     // MARK: 顶部状态行
 
     private var header: some View {
         HStack {
-            Text("用户词频")
+            Text(mode.title)
                 .font(.subheadline.bold())
             Spacer()
             Text("共 \(formatStatCount(model.total)) 条")
@@ -960,10 +976,10 @@ struct WordFrequencyView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                TextField("搜索字词", text: $model.searchText)
+                TextField(mode.searchTextPlaceholder, text: $model.searchText)
                     .textFieldStyle(.plain)
                     .font(.caption)
-                    .frame(minWidth: 120)
+                    .frame(minWidth: 60, maxWidth: .infinity)
                 if !model.searchText.isEmpty {
                     Button {
                         model.searchText = ""
@@ -990,7 +1006,8 @@ struct WordFrequencyView: View {
                 Text("用户词").tag("user")
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 220)
+            .labelsHidden()
+            .fixedSize()
             .onChange(of: model.typeFilter) { _ in
                 model.reload()
             }
@@ -1009,7 +1026,8 @@ struct WordFrequencyView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .frame(maxWidth: 220)
+                .labelsHidden()
+                .frame(maxWidth: 150)
             }
 
             Spacer()
@@ -1021,7 +1039,7 @@ struct WordFrequencyView: View {
     private var tableView: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("字词").frame(width: 90, alignment: .leading)
+                Text(mode.textColumnTitle).frame(width: 90, alignment: .leading)
                 Text("编码").frame(width: 100, alignment: .leading)
                 Text("次数").frame(width: 80, alignment: .trailing)
                 Text("应用").frame(maxWidth: .infinity, alignment: .leading)
@@ -1039,12 +1057,14 @@ struct WordFrequencyView: View {
                     }
                 }
             }
-            .frame(height: 280)
+            // 弹性高度：跟随窗口剩余空间，避免分页条被挤出可视区域
+            .frame(minHeight: 120, maxHeight: .infinity)
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
                     .stroke(Color.black.opacity(0.1), lineWidth: 1)
             )
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func row(_ entry: WordFrequencyEntry, zebra: Bool) -> some View {
@@ -1130,22 +1150,36 @@ struct WordFrequencyView: View {
         } else {
             panel.allowedFileTypes = ["csv"]
         }
-        panel.nameFieldStringValue = "用户词频.csv"
+        panel.nameFieldStringValue = mode.exportFileName
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let type: String? = model.typeFilter == "all" ? nil : model.typeFilter
         let search: String? = model.searchText.isEmpty ? nil : model.searchText
-        try? Statistics.shared.exportWordFrequencyCSV(
-            to: url,
-            type: type,
-            appBundleId: model.appFilter,
-            searchText: search,
-            limit: 50000
-        )
+        switch mode {
+        case .word:
+            try? Statistics.shared.exportWordFrequencyCSV(
+                to: url,
+                type: type,
+                appBundleId: model.appFilter,
+                searchText: search,
+                limit: 50000
+            )
+        case .char:
+            try? Statistics.shared.exportCharFrequencyCSV(
+                to: url,
+                type: type,
+                appBundleId: model.appFilter,
+                searchText: search,
+                limit: 50000
+            )
+        }
     }
 }
 
-/// 用户词频 ViewModel
+/// 用户词频 / 用户字频 ViewModel（按 mode 切换查询）
 final class WordFrequencyModel: ObservableObject {
+    /// 词频 / 字频模式
+    let mode: WordFrequencyMode
+
     @Published var searchText: String = ""
     @Published var typeFilter: String = "all"
     @Published var appFilter: String? = nil
@@ -1161,7 +1195,8 @@ final class WordFrequencyModel: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
 
-    init() {
+    init(mode: WordFrequencyMode = .word) {
+        self.mode = mode
         reload()
         NotificationCenter.default
             .publisher(for: Statistics.updated)
@@ -1188,12 +1223,23 @@ final class WordFrequencyModel: ObservableObject {
         let search: String? = searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? nil
             : searchText
-        let raw = Statistics.shared.queryWordFrequencyEntries(
-            type: type,
-            appBundleId: appFilter,
-            searchText: search,
-            limit: 10000
-        )
+        let raw: [WordFrequencyEntry]
+        switch mode {
+        case .word:
+            raw = Statistics.shared.queryWordFrequencyEntries(
+                type: type,
+                appBundleId: appFilter,
+                searchText: search,
+                limit: 10000
+            )
+        case .char:
+            raw = Statistics.shared.queryCharFrequencyEntries(
+                type: type,
+                appBundleId: appFilter,
+                searchText: search,
+                limit: 10000
+            )
+        }
         fullResultCache = raw
         total = Int64(raw.count)
         totalPages = max(1, (raw.count + pageSize - 1) / pageSize)

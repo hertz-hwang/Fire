@@ -7,10 +7,15 @@
 //
 
 import SwiftUI
-import Settings
 import Defaults
 import AppKit
 import UniformTypeIdentifiers
+
+// MARK: - 偏好设置面板（迁移自 Settings 库）
+//
+// 原使用 Settings.Container/Section 包装，现改用原生 Form + .formStyle(.grouped)，
+// 与侧边栏风格的首选项窗口（NativePreferencesView）配套。
+// 布局选项与功能保持不变。
 
 struct GeneralPane: View {
 
@@ -138,243 +143,209 @@ struct GeneralPane: View {
     }
 
     var body: some View {
-        Settings.Container(contentWidth: 450.0) {
-            Settings.Section(title: "") {
-                VStack(alignment: .leading, spacing: 18) {
-                    GroupBox(label: Text("编码")) {
-                        VStack(spacing: 12) {
-                            HStack {
-                                Picker("编码方案", selection: $code) {
-                                    Text("码表").tag(CodeMode.wubi)
-                                    Text("拼音").tag(CodeMode.pinyin)
-                                    Text("码表拼音混合").tag(CodeMode.wubiPinyin)
-                                }
-                                .frame(width: 180)
-                                .onChange(of: code) { _ in
-                                    enforcePinyinDefaults()
-                                }
-                                // 仅码表方案提供内置码表选择（选项来自 Resources/schemas）
-                                if code == .wubi {
-                                    Picker("码表", selection: tableSelectionBinding) {
-                                        ForEach(builtinTables) { info in
-                                            Text(info.name)
-                                                .help(info.tooltip)
-                                                .tag(info.path)
-                                        }
-                                        Text("自定义码表").tag(customTableTag)
-                                    }
-                                    .frame(width: 170)
-                                }
-                                Spacer(minLength: 20)
-                            }
-                            if code == .wubi, !SchemaCatalog.isSelectableBuiltin(path: wbTablePath), !wbTablePath.isEmpty {
-                                HStack {
-                                    Text(wbTablePath)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                }
-                            }
-                            HStack {
-                                Toggle("整句", isOn: $enableSentenceMode)
-                                    // 拼音方案强制整句：勾选锁定不可改；
-                                    // 所选码表无配套整句码表（五笔86/98 等）：不可勾选
-                                    .disabled(isPinyin || !sentenceAvailableForTable)
-                                if enableSentenceMode {
-                                    Toggle("显示打分", isOn: $enableSentenceScore)
-                                        .help("在各整句候选末尾显示各维度加权得分（通用ngram、用户ngram等），颜色/字号/加粗可在主题 JSON 中配置")
-                                }
-                                Spacer(minLength: 50)
-                            }
-                            HStack {
-                                Picker("最大码长", selection: $maxCodeLength) {
-                                    ForEach(3...9, id: \.self) { n in
-                                        Text("\(n)").tag(n)
-                                    }
-                                }
-                                .disabled(isPinyin || enableSentenceMode)
-                                Spacer(minLength: 20)
-                                Picker("上屏模式", selection: $commitMode) {
-                                    Text("空格上屏").tag(CommitMode.spaceCommit)
-                                    Text("\(chineseNumber(maxCodeLength))码唯一上屏").tag(CommitMode.uniqueAtN)
-                                    Text("统一第\(chineseNumber(maxCodeLength + 1))码顶").tag(CommitMode.commitAtM)
-                                    Text("空码顶字上屏").tag(CommitMode.emptyCodePush)
-                                    Text("空码直接上屏").tag(CommitMode.emptyCodeDirect)
-                                    Text("\(chineseNumber(maxCodeLength + 1))二顶").tag(CommitMode.commitAtM2)
-                                    Text("\(chineseNumber(maxCodeLength + 1))三顶").tag(CommitMode.commitAtM3)
-                                }
-                                .disabled(isPinyin || enableSentenceMode)
-                                Spacer(minLength: 50)
-                            }
-                            if enableSentenceMode {
-                                HStack {
-                                    Toggle("自动上屏", isOn: $enableSentenceAutoCommit)
-                                        // 拼音方案统一空格上屏：不可启用自动上屏
-                                        .disabled(isPinyin)
-                                    Spacer(minLength: 50)
-                                }
-                                HStack {
-                                    Toggle("单字重码组句", isOn: $enableSentenceAllowDuplicateSingle)
-                                        // 拼音方案固定启用（词表侧已按 rank 截断防爆）
-                                        .disabled(isPinyin)
-                                    Spacer(minLength: 50)
-                                }
-                                HStack {
-                                    Text("N-gram留存信息数")
-                                    Slider(value: Binding(
-                                        get: { Double(sentenceContextDepth) },
-                                        set: { sentenceContextDepth = Int($0) }
-                                    ), in: 0...2, step: 1) {
-                                        EmptyView()
-                                    }
-                                    Text("\(sentenceContextDepth)")
-                                        .frame(width: 20, alignment: .trailing)
-                                    Spacer(minLength: 50)
-                                }
-                                HStack {
-                                    Text("0：不留存；1：保留前一次上屏文本的信息；2：保留前两次上屏文本的信息，用于后续组句的语境")
-                                        .font(Font.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                    Spacer(minLength: 0)
-                                }
-                            }
-                            if commitMode == .emptyCodeDirect && !enableSentenceMode {
-                                HStack {
-                                    Text("上屏延迟")
-                                    Slider(value: $emptyCodeDirectDelay, in: 0.1...1.0, step: 0.1) {
-                                        EmptyView()
-                                    }
-                                    Text(String(format: "%.1f 秒", emptyCodeDirectDelay))
-                                        .frame(width: 45, alignment: .trailing)
-                                    Spacer(minLength: 50)
-                                }
-                            }
-                            HStack {
-                                Toggle("提示编码", isOn: $wubiCodeTip)
-                                    // 拼音方案整句走精确码边，固定关闭
-                                    .disabled(isPinyin)
-                                Spacer(minLength: 50)
-                            }
-                            HStack {
-                                Toggle("z键查询", isOn: $zKeyQuery)
-                                    // 整句走精确码边，没有 xxx* 通配查询的余地
-                                    .disabled(isPinyin || enableSentenceMode)
-                                Spacer(minLength: 50)
-                            }
-                            HStack {
-                                Toggle("z键重复上屏", isOn: $zKeyRepeat)
-                                    // 拼音方案固定关闭
-                                    .disabled(isPinyin)
-                                Spacer(minLength: 50)
-                            }
-                        }
+        Form {
+            Section {
+                PreferencePickerRow(title: "编码方案") {
+                    Picker("", selection: $code) {
+                        Text("码表").tag(CodeMode.wubi)
+                        Text("拼音").tag(CodeMode.pinyin)
+                        Text("码表拼音混合").tag(CodeMode.wubiPinyin)
                     }
-                    GroupBox(label: Text("候选词")) {
-                        VStack(spacing: 12) {
-                            HStack {
-                                Picker("候选词排列", selection: $candidatesDirection) {
-                                    Text("横向").tag(CandidatesDirection.horizontal)
-                                    Text("竖向").tag(CandidatesDirection.vertical)
-                                }
-                                Spacer(minLength: 50)
-                                Picker("候选词数量", selection: $candidateCount) {
-                                    Text("3").tag(3)
-                                    Text("4").tag(4)
-                                    Text("5").tag(5)
-                                    Text("6").tag(6)
-                                    Text("7").tag(7)
-                                    Text("8").tag(8)
-                                    Text("9").tag(9)
-                                }
-                            }
-                            HStack {
-                                Toggle("拆分信息悬浮提示", isOn: $enableCharDivTip)
-                                Spacer(minLength: 20)
-                            }
-                            HStack {
-                                Toggle("候选框显示输入码", isOn: $showCodeInWindow)
-                                Spacer(minLength: 20)
-                            }
-                            if !showCodeInWindow {
-                                HStack {
-                                    Picker("", selection: $codeInWindowMode) {
-                                        Text("显示输入码（默认）").tag(CodeInWindowMode.inputCode)
-                                        Text("显示首选项").tag(CodeInWindowMode.firstCandidate)
-                                    }
-                                    .frame(width: 200, alignment: .leading)
-                                    Spacer()
-                                }
-                            }
-                            HStack {
-                                Toggle("启用;键次选/引号三选", isOn: $enablePunctuationCandidateSelect)
-                                Spacer(minLength: 20)
-                            }
-                            HStack {
-                                Picker("二三候选词额外选择键", selection: $extraCandidateSelectKeys) {
-                                    Text("禁用").tag(ExtraCandidateSelectKeys.disabled)
-                                    Text(";'").tag(ExtraCandidateSelectKeys.semicolonQuote)
-                                    Text(",.").tag(ExtraCandidateSelectKeys.commaPeriod)
-                                }
-                                Spacer(minLength: 20)
-                            }
-                            HStack {
-                                Picker("简全模式", selection: $jianQuanMode) {
-                                    Text("默认").tag(JianQuanMode.normal)
-                                    Text("出简让全").tag(JianQuanMode.quanAfterJian)
-                                    Text("出简无全").tag(JianQuanMode.noQuanIfJian)
-                                }
-                                .frame(width: 200, alignment: .leading)
-                                // 整句用精确码边，简全让位在整句下没有作用对象
-                                .disabled(enableSentenceMode)
-                                Spacer()
-                            }
-                        }
-                    }
-                    GroupBox(label: Text("中英文切换")) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Toggle("禁止切换英文", isOn: $disableEnMode)
-                                Spacer()
-                                Toggle("状态栏显示", isOn: $showInputModeStatus)
-                            }
-                            HStack {
-                                Toggle("中文与英文/数字之间插入空格", isOn: $enableWhitespaceBetweenZhEn)
-                                Spacer()
-                                Toggle("禁用;键临时英文模式", isOn: $disableTempEnMode)
-                            }
-                            HStack {
-                                Picker("快捷键", selection: $toggleInputModeKey) {
-                                    Text("control").tag(ModifierKey.control)
-                                    Text("shift").tag(ModifierKey.shift)
-                                    Text("左shift").tag(ModifierKey.leftShift)
-                                    Text("右shift").tag(ModifierKey.rightShift)
-                                    Text("option").tag(ModifierKey.option)
-                                    Text("command").tag(ModifierKey.command)
-                                    Text("fn").tag(ModifierKey.function)
-                                }
-                                .disabled(disableEnMode)
-                                Spacer(minLength: 50)
-                                Picker(
-                                    "提示框位置",
-                                    selection: $inputModeTipWindowType
-                                ) {
-                                    Text("屏幕中间")
-                                    .tag(InputModeTipWindowType.centerScreen)
-                                    Text("跟随输入框")
-                                    .tag(InputModeTipWindowType.followInput)
-                                    Text("不显示")
-                                    .tag(InputModeTipWindowType.none)
-                                }
-                                .disabled(disableEnMode)
-                            }
-                        }
+                    .labelsHidden()
+                    .onChange(of: code) { _ in
+                        enforcePinyinDefaults()
                     }
                 }
+                // 仅码表方案提供内置码表选择（选项来自 Resources/schemas）
+                if code == .wubi {
+                    PreferencePickerRow(title: "码表") {
+                        Picker("", selection: tableSelectionBinding) {
+                            ForEach(builtinTables) { info in
+                                Text(info.name)
+                                    .help(info.tooltip)
+                                    .tag(info.path)
+                            }
+                            Text("自定义码表").tag(customTableTag)
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                    if !SchemaCatalog.isSelectableBuiltin(path: wbTablePath), !wbTablePath.isEmpty {
+                        Text(wbTablePath)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                PreferenceToggleRow(title: "整句", isOn: $enableSentenceMode)
+                    // 拼音方案强制整句：勾选锁定不可改；
+                    // 所选码表无配套整句码表（五笔86/98 等）：不可勾选
+                    .disabled(isPinyin || !sentenceAvailableForTable)
+                if enableSentenceMode {
+                    PreferenceToggleRow(title: "显示打分", caption: "整句候选末尾显示加权得分", isOn: $enableSentenceScore)
+                        .help("在各整句候选末尾显示各维度加权得分（通用ngram、用户ngram等），颜色/字号/加粗可在主题 JSON 中配置")
+                    PreferenceToggleRow(title: "自动上屏", isOn: $enableSentenceAutoCommit)
+                        // 拼音方案统一空格上屏：不可启用自动上屏
+                        .disabled(isPinyin)
+                    PreferenceToggleRow(title: "单字重码组句", isOn: $enableSentenceAllowDuplicateSingle)
+                        // 拼音方案固定启用（词表侧已按 rank 截断防爆）
+                        .disabled(isPinyin)
+                    HStack(spacing: 8) {
+                        Text("N-gram留存信息数")
+                        Slider(value: Binding(
+                            get: { Double(sentenceContextDepth) },
+                            set: { sentenceContextDepth = Int($0) }
+                        ), in: 0...2, step: 1) {
+                            EmptyView()
+                        }
+                        Text("\(sentenceContextDepth)")
+                            .frame(width: 20, alignment: .trailing)
+                    }
+                    Text("0：不留存；1：保留前一次上屏文本的信息；2：保留前两次上屏文本的信息，用于后续组句的语境")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                PreferencePickerRow(title: "最大码长") {
+                    Picker("", selection: $maxCodeLength) {
+                        ForEach(3...9, id: \.self) { n in
+                            Text("\(n)").tag(n)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                .disabled(isPinyin || enableSentenceMode)
+                PreferencePickerRow(title: "上屏模式") {
+                    Picker("", selection: $commitMode) {
+                        Text("空格上屏").tag(CommitMode.spaceCommit)
+                        Text("\(chineseNumber(maxCodeLength))码唯一上屏").tag(CommitMode.uniqueAtN)
+                        Text("统一第\(chineseNumber(maxCodeLength + 1))码顶").tag(CommitMode.commitAtM)
+                        Text("空码顶字上屏").tag(CommitMode.emptyCodePush)
+                        Text("空码直接上屏").tag(CommitMode.emptyCodeDirect)
+                        Text("\(chineseNumber(maxCodeLength + 1))二顶").tag(CommitMode.commitAtM2)
+                        Text("\(chineseNumber(maxCodeLength + 1))三顶").tag(CommitMode.commitAtM3)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                .disabled(isPinyin || enableSentenceMode)
+                if commitMode == .emptyCodeDirect && !enableSentenceMode {
+                    HStack(spacing: 8) {
+                        Text("上屏延迟")
+                        Slider(value: $emptyCodeDirectDelay, in: 0.1...1.0, step: 0.1) {
+                            EmptyView()
+                        }
+                        Text(String(format: "%.1f 秒", emptyCodeDirectDelay))
+                            .frame(width: 45, alignment: .trailing)
+                    }
+                }
+                PreferenceToggleRow(title: "提示编码", isOn: $wubiCodeTip)
+                    // 拼音方案整句走精确码边，固定关闭
+                    .disabled(isPinyin)
+                PreferenceToggleRow(title: "Z键查询", caption: "万能键", isOn: $zKeyQuery)
+                    // 整句走精确码边，没有 xxx* 通配查询的余地
+                    .disabled(isPinyin || enableSentenceMode)
+                PreferenceToggleRow(title: "Z键重复上屏", isOn: $zKeyRepeat)
+                    // 拼音方案固定关闭
+                    .disabled(isPinyin)
+            } header: {
+                Text("编码")
+            }
+            Section {
+                PreferencePickerRow(title: "排列方式") {
+                    Picker("", selection: $candidatesDirection) {
+                        Text("横向").tag(CandidatesDirection.horizontal)
+                        Text("竖向").tag(CandidatesDirection.vertical)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                PreferencePickerRow(title: "候选词数量") {
+                    Picker("", selection: $candidateCount) {
+                        Text("3").tag(3)
+                        Text("4").tag(4)
+                        Text("5").tag(5)
+                        Text("6").tag(6)
+                        Text("7").tag(7)
+                        Text("8").tag(8)
+                        Text("9").tag(9)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                PreferenceToggleRow(title: "候选框显示输入码", caption: "不内嵌文本框", isOn: $showCodeInWindow)
+                if !showCodeInWindow {
+                    PreferencePickerRow(title: "输入码显示方式") {
+                        Picker("", selection: $codeInWindowMode) {
+                            Text("显示输入码（默认）").tag(CodeInWindowMode.inputCode)
+                            Text("显示首选项").tag(CodeInWindowMode.firstCandidate)
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                }
+                PreferenceToggleRow(title: "拆分信息悬浮提示", isOn: $enableCharDivTip)
+                PreferenceToggleRow(title: "启用;键次选/引号三选", isOn: $enablePunctuationCandidateSelect)
+                PreferencePickerRow(title: "二三候选额外选择键") {
+                    Picker("", selection: $extraCandidateSelectKeys) {
+                        Text("禁用").tag(ExtraCandidateSelectKeys.disabled)
+                        Text(";'").tag(ExtraCandidateSelectKeys.semicolonQuote)
+                        Text(",.").tag(ExtraCandidateSelectKeys.commaPeriod)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                PreferencePickerRow(title: "简全模式") {
+                    Picker("", selection: $jianQuanMode) {
+                        Text("默认").tag(JianQuanMode.normal)
+                        Text("出简让全").tag(JianQuanMode.quanAfterJian)
+                        Text("出简无全").tag(JianQuanMode.noQuanIfJian)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    // 整句用精确码边，简全让位在整句下没有作用对象
+                    .disabled(enableSentenceMode)
+                }
+            } header: {
+                Text("候选词")
+            }
+            Section {
+                PreferenceToggleRow(title: "禁止切换英文", isOn: $disableEnMode)
+                PreferenceToggleRow(title: "状态栏显示中英文状态", isOn: $showInputModeStatus)
+                    .disabled(disableEnMode)
+                PreferenceToggleRow(title: "中文与英文/数字之间插入空格", isOn: $enableWhitespaceBetweenZhEn)
+                PreferenceToggleRow(title: "禁用;键临时英文模式", isOn: $disableTempEnMode)
+                PreferencePickerRow(title: "中英文切换快捷键") {
+                    Picker("", selection: $toggleInputModeKey) {
+                        Text("control").tag(ModifierKey.control)
+                        Text("shift").tag(ModifierKey.shift)
+                        Text("左shift").tag(ModifierKey.leftShift)
+                        Text("右shift").tag(ModifierKey.rightShift)
+                        Text("option").tag(ModifierKey.option)
+                        Text("command").tag(ModifierKey.command)
+                        Text("fn").tag(ModifierKey.function)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    .disabled(disableEnMode)
+                }
+                PreferencePickerRow(title: "提示框位置") {
+                    Picker("", selection: $inputModeTipWindowType) {
+                        Text("屏幕中间").tag(InputModeTipWindowType.centerScreen)
+                        Text("跟随输入框").tag(InputModeTipWindowType.followInput)
+                        Text("不显示").tag(InputModeTipWindowType.none)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    .disabled(disableEnMode)
+                }
+            } header: {
+                Text("中英文切换")
             }
         }
+        .formStyle(.grouped)
     }
 }
 

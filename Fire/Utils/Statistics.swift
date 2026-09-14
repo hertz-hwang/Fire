@@ -312,6 +312,127 @@ class Statistics {
         return entries
     }
 
+    /// 用户字频查询（统计页 - 用户字频）
+    /// 把每条上屏记录拆成单字后按字聚合，不以词记录：
+    ///  - text: 单个字符（grapheme）
+    ///  - count: 该单字累计出现次数
+    ///  - code: 该单字最常用的编码
+    ///  - appBundleId / appName: 该单字最常被输入的应用
+    ///  - type / appBundleId 为 SQL 行级筛选；searchText 为字符级筛选
+    ///    （保留出现在搜索串中的单字）
+    func queryCharFrequencyEntries(
+        type: String? = nil,
+        appBundleId: String? = nil,
+        searchText: String? = nil,
+        limit: Int = 10000
+    ) -> [WordFrequencyEntry] {
+        var conditions: [String] = []
+        var binds: [String] = []
+        if let type = type {
+            switch type {
+            case "wb", "py", "user", "placeholder", "sentence":
+                conditions.append("type = ?")
+                binds.append(type)
+            default:
+                break
+            }
+        }
+        if let app = appBundleId, !app.isEmpty {
+            conditions.append("appBundleId = ?")
+            binds.append(app)
+        }
+        let whereClause = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
+        // 扫描行数上限：单字聚合后结果数远小于行数
+        let scanLimit = 50000
+        let sql = """
+            SELECT text, code, appBundleId
+            FROM data
+            \(whereClause)
+            ORDER BY id DESC
+            LIMIT \(scanLimit)
+        """
+        struct CharAgg {
+            var count: Int64 = 0
+            var codes: [String: Int] = [:]
+            var apps: [String: Int] = [:]
+        }
+        var aggs: [Character: CharAgg] = [:]
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
+            var idx: Int32 = 1
+            for value in binds {
+                sqlite3_bind_text(stmt, idx, value, -1, SQLITE_TRANSIENT)
+                idx += 1
+            }
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let text = String(cString: sqlite3_column_text(stmt, 0))
+                let code: String = {
+                    if let p = sqlite3_column_text(stmt, 1) { return String(cString: p) }
+                    return ""
+                }()
+                let app: String = {
+                    if let p = sqlite3_column_text(stmt, 2) { return String(cString: p) }
+                    return ""
+                }()
+                for ch in text {
+                    var agg = aggs[ch] ?? CharAgg()
+                    agg.count += 1
+                    agg.codes[code, default: 0] += 1
+                    if !app.isEmpty { agg.apps[app, default: 0] += 1 }
+                    aggs[ch] = agg
+                }
+            }
+        }
+        sqlite3_finalize(stmt)
+
+        let trimmedSearch = searchText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let safeLimit = max(1, limit)
+        var entries: [WordFrequencyEntry] = []
+        entries.reserveCapacity(min(aggs.count, safeLimit))
+        for (ch, agg) in aggs {
+            if !trimmedSearch.isEmpty && !trimmedSearch.contains(ch) { continue }
+            let topCode = agg.codes.max { ($0.value, $0.key) < ($1.value, $1.key) }?.key ?? ""
+            let topApp = agg.apps.max { ($0.value, $0.key) < ($1.value, $1.key) }?.key ?? ""
+            entries.append(WordFrequencyEntry(
+                text: String(ch),
+                code: topCode,
+                count: agg.count,
+                appBundleId: topApp,
+                appName: Statistics.appDisplayName(for: topApp)
+            ))
+        }
+        entries.sort { ($0.count, $1.text) > ($1.count, $0.text) }
+        return Array(entries.prefix(safeLimit))
+    }
+
+    /// 导出用户字频为 CSV（列：单字,编码,次数,应用名称）
+    func exportCharFrequencyCSV(
+        to url: URL,
+        type: String? = nil,
+        appBundleId: String? = nil,
+        searchText: String? = nil,
+        limit: Int = 50000
+    ) throws {
+        let entries = queryCharFrequencyEntries(
+            type: type,
+            appBundleId: appBundleId,
+            searchText: searchText,
+            limit: limit
+        )
+        var csv = "单字,编码,次数,应用名称\n"
+        for entry in entries {
+            let displayApp = entry.appName.isEmpty ? entry.appBundleId : entry.appName
+            let row = [
+                Statistics.csvEscape(entry.text),
+                Statistics.csvEscape(entry.code),
+                String(entry.count),
+                Statistics.csvEscape(displayApp)
+            ].joined(separator: ",")
+            csv += row + "\n"
+        }
+        try csv.write(to: url, atomically: true, encoding: .utf8)
+    }
+
     /// 应用 bundle identifier → 本地化显示名（解析失败时回退到 bundle id）
     static func appDisplayName(for bundleId: String) -> String {
         guard !bundleId.isEmpty else { return "" }

@@ -6,9 +6,9 @@
 //
 
 import SwiftUI
-import Settings
 import Defaults
 
+/// 快捷键设置面板：迁移至原生 Form(.grouped)，与侧边栏风格首选项配套
 struct HotkeyPane: View {
     @Default(.openPreferencesShortcutModifier) private var shortcutModifier
     @Default(.openPreferencesShortcutKey) private var shortcutKey
@@ -25,77 +25,51 @@ struct HotkeyPane: View {
         return String(first).lowercased()
     }
 
+    /// 一行「修饰键 + 按键」快捷键编辑器
+    @ViewBuilder
+    private func shortcutRow(_ title: String, modifier: Binding<ModifierKey>, key: Binding<String>, caption: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(title)
+                Spacer(minLength: 8)
+                Picker("", selection: modifier) {
+                    Text("control").tag(ModifierKey.control)
+                    Text("shift").tag(ModifierKey.shift)
+                    Text("option").tag(ModifierKey.option)
+                    Text("command").tag(ModifierKey.command)
+                    Text("fn").tag(ModifierKey.function)
+                }
+                .labelsHidden()
+                .fixedSize()
+                Text("+")
+                    .foregroundStyle(.secondary)
+                TextField("按键", text: Binding<String>(
+                    get: { key.wrappedValue },
+                    set: { key.wrappedValue = normalizedKey($0, fallback: key.wrappedValue) }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 60)
+            }
+            Text(caption)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
     var body: some View {
-        Settings.Container(contentWidth: 450) {
-            Settings.Section(title: "") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("打开首选项")
-                    HStack(spacing: 12) {
-                        Picker("修饰键", selection: $shortcutModifier) {
-                            Text("control").tag(ModifierKey.control)
-                            Text("shift").tag(ModifierKey.shift)
-                            Text("option").tag(ModifierKey.option)
-                            Text("command").tag(ModifierKey.command)
-                            Text("fn").tag(ModifierKey.function)
-                        }
-                        .frame(width: 160)
-                        Text("+")
-                        TextField("按键", text: Binding<String>(
-                            get: { shortcutKey },
-                            set: { shortcutKey = normalizedKey($0, fallback: shortcutKey) }
-                        ))
-                        .frame(width: 80)
-                    }
-                    Text("仅支持一个修饰键 + 单个按键")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                }
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("撤消上屏")
-                    HStack(spacing: 12) {
-                        Picker("修饰键", selection: $undoShortcutModifier) {
-                            Text("control").tag(ModifierKey.control)
-                            Text("shift").tag(ModifierKey.shift)
-                            Text("option").tag(ModifierKey.option)
-                            Text("command").tag(ModifierKey.command)
-                            Text("fn").tag(ModifierKey.function)
-                        }
-                        .frame(width: 160)
-                        Text("+")
-                        TextField("按键", text: Binding<String>(
-                            get: { undoShortcutKey },
-                            set: { undoShortcutKey = normalizedKey($0, fallback: undoShortcutKey) }
-                        ))
-                        .frame(width: 80)
-                    }
-                    Text("仅支持一个修饰键 + 单个按键")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                }
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("清空编码串")
-                    HStack(spacing: 12) {
-                        Picker("修饰键", selection: $clearCodeShortcutModifier) {
-                            Text("control").tag(ModifierKey.control)
-                            Text("shift").tag(ModifierKey.shift)
-                            Text("option").tag(ModifierKey.option)
-                            Text("command").tag(ModifierKey.command)
-                            Text("fn").tag(ModifierKey.function)
-                        }
-                        .frame(width: 160)
-                        Text("+")
-                        TextField("按键", text: Binding<String>(
-                            get: { clearCodeShortcutKey },
-                            set: { clearCodeShortcutKey = normalizedKey($0, fallback: clearCodeShortcutKey) }
-                        ))
-                        .frame(width: 80)
-                    }
-                    Text("直接丢弃当前未上屏的编码（非ESC）；无编码时该快捷键交回应用处理")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                }
+        Form {
+            Section {
+                shortcutRow("打开首选项", modifier: $shortcutModifier, key: $shortcutKey,
+                           caption: "仅支持一个修饰键 + 单个按键")
+                shortcutRow("撤消上屏", modifier: $undoShortcutModifier, key: $undoShortcutKey,
+                           caption: "仅支持一个修饰键 + 单个按键")
+                shortcutRow("清空编码串", modifier: $clearCodeShortcutModifier, key: $clearCodeShortcutKey,
+                           caption: "直接丢弃当前未上屏的编码（非ESC）；无编码时该快捷键交回应用处理")
+            } header: {
+                Text("全局快捷键")
             }
         }
+        .formStyle(.grouped)
     }
 }
 

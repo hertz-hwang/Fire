@@ -42,7 +42,7 @@ class Utils {
         if messageToast == nil {
             messageToast = ToastWindow()
         }
-        messageToast?.showToast(text) { [weak self] in
+        messageToast?.showToast(text, duration: 3.0) { [weak self] in
             self?.messageToast = nil
         }
     }

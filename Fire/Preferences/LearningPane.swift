@@ -8,7 +8,6 @@
 
 import SwiftUI
 import AppKit
-import Settings
 import Defaults
 import UniformTypeIdentifiers
 
@@ -139,66 +138,61 @@ struct LearningPane: View {
     }
 
     var body: some View {
-        Settings.Container(contentWidth: 450.0) {
-            Settings.Section(title: "") {
-                VStack(alignment: .leading, spacing: 10) {
-                    GroupBox(label: Text("用词习惯学习")) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Toggle("启用学习系统（辅助整句 n-gram 模型）", isOn: $enableLearning)
-                            if enableLearning {
-                                Toggle("字符级用户 n-gram：长期用词习惯，带时间衰减", isOn: $enableLearningUserNgram)
-                                Toggle("会话缓存：最近输入的内容优先（切换输入框自动清空）", isOn: $enableLearningSessionCache)
-                                Toggle("纠错对：记住同码下被你否决的首选", isOn: $enableLearningCorrection)
-                                HStack {
-                                    Text("学习强度")
-                                    Slider(value: $learningStrength, in: 0.2...2.0)
-                                        .frame(width: 180)
-                                    Text(String(format: "%.1f", learningStrength))
-                                        .font(.system(size: 12).monospacedDigit())
-                                        .frame(width: 32)
-                                }
-                            }
-                        }
-                        .padding(6)
+        Form {
+            Section {
+                PreferenceToggleRow(title: "启用学习系统", caption: "辅助整句 n-gram 模型", isOn: $enableLearning)
+                if enableLearning {
+                    PreferenceToggleRow(title: "字符级用户 n-gram", caption: "长期用词习惯，带时间衰减", isOn: $enableLearningUserNgram)
+                    PreferenceToggleRow(title: "会话缓存", caption: "最近输入的内容优先（切换输入框自动清空）", isOn: $enableLearningSessionCache)
+                    PreferenceToggleRow(title: "纠错对", caption: "记住同码下被你否决的首选", isOn: $enableLearningCorrection)
+                    HStack(spacing: 8) {
+                        Text("学习强度")
+                        Slider(value: $learningStrength, in: 0.2...2.0)
+                        Text(String(format: "%.1f", learningStrength))
+                            .font(.system(size: 12).monospacedDigit())
+                            .frame(width: 32)
                     }
-                    if enableLearning {
-                        GroupBox(label: Text("学习数据")) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(statusText)
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                HStack {
-                                    Button("立即落库") {
-                                        LearnerCenter.shared.flushImmediately()
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { refreshStatus() }
-                                    }
-                                    Button(backfillRunning ? "重建中…" : "回填历史数据") {
-                                        runBackfill()
-                                    }
-                                    .disabled(backfillRunning)
-                                    Button("清除学习数据") {
-                                        clearData()
-                                    }
-                                }
-                                HStack {
-                                    Button("导出学习数据 (TCSKNM02)") {
-                                        exportLearning()
-                                    }
-                                    Button("导入学习数据 (TCSKNM02)") {
-                                        importLearning()
-                                    }
-                                }
-                                Text("学习数据只保存在本机加密数据库，不会上传；撤销上屏（默认 Ctrl+U）会同步回退学习计数。导入导出覆盖字符 n-gram（TCSKNM02 分页格式），纠错对保留在本地库。")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(6)
+                }
+            } header: {
+                Text("用词习惯学习")
+            }
+            if enableLearning {
+                Section {
+                    Text(statusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack {
+                        Button("立即落库") {
+                            LearnerCenter.shared.flushImmediately()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { refreshStatus() }
+                        }
+                        Button(backfillRunning ? "重建中…" : "回填历史数据") {
+                            runBackfill()
+                        }
+                        .disabled(backfillRunning)
+                        Button("清除学习数据") {
+                            clearData()
                         }
                     }
+                    HStack {
+                        Button("导出学习数据 (TCSKNM02)") {
+                            exportLearning()
+                        }
+                        Button("导入学习数据 (TCSKNM02)") {
+                            importLearning()
+                        }
+                    }
+                    Text("学习数据只保存在本机加密数据库，不会上传；撤销上屏（默认 Ctrl+U）会同步回退学习计数。导入导出覆盖字符 n-gram（TCSKNM02 分页格式），纠错对保留在本地库。")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } header: {
+                    Text("学习数据")
                 }
             }
         }
+        .formStyle(.grouped)
         .onAppear(perform: refreshStatus)
     }
 }

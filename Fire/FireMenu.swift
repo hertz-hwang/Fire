@@ -35,13 +35,10 @@ extension FireInputController {
         SUUpdater.shared()?.checkForUpdates(sender)
     }
     override func showPreferences(_ sender: Any!) {
-        NSApp.setActivationPolicy(.accessory)
-        NSApp.activate(ignoringOtherApps: true)
+        // 侧边栏风格首选项窗口由控制器负责激活策略与前台激活
         FirePreferencesController.shared.show()
     }
     @objc func showUserDictPrefs(_ sender: Any!) {
-        NSApp.setActivationPolicy(.accessory)
-        NSApp.activate(ignoringOtherApps: true)
         FirePreferencesController.shared.showPane("用户词库")
     }
 

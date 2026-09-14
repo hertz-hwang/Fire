@@ -7,76 +7,73 @@
 //
 
 import SwiftUI
-import Settings
 import Defaults
 
+/// 标点符号面板：迁移至原生 Form(.grouped)，与侧边栏风格首选项配套
 struct PunctuationPane: View {
     @Default(.punctuationMode) private var punctuationMode
     @Default(.customPunctuationSettings) private var customPunctuationSettings
     @Default(.enableDotAfterNumber) private var enableDotAfterNumber
     @Default(.enableColonAfterNumber) private var enableColonAfterNumber
     @Default(.enablePunctuationTopScreen) private var enablePunctuationTopScreen
+
     var body: some View {
-        Settings.Container(contentWidth: 450) {
-            Settings.Section(title: "") {
-                HStack {
-                    Picker("标点符号方案", selection: $punctuationMode) {
+        Form {
+            Section {
+                PreferencePickerRow(title: "标点符号方案") {
+                    Picker("", selection: $punctuationMode) {
                         Text("半角").tag(PunctuationMode.enUs)
                         Text("全角").tag(PunctuationMode.zhhans)
                         Text("自定义").tag(PunctuationMode.custom)
                     }
-                    Spacer(minLength: 150)
+                    .labelsHidden()
+                    .fixedSize()
                 }
-                HStack {
-                    Toggle("数字/字母后标点自动转为英文（连按两次转回中文）", isOn: $enableDotAfterNumber)
-                }
-                HStack {
-                    Toggle("数字后输入 “：”（全角） 自动转为 “:”（半角），适用于 12:45 时间场景", isOn: $enableColonAfterNumber)
-                }
-                HStack {
-                    Toggle("标点顶屏", isOn: $enablePunctuationTopScreen)
-                }
-                VStack(alignment: .leading) {
-                    Text("自定义符号")
-                    Spacer(minLength: 4)
-                    VStack {
-                        HStack {
-                            Text("按键")
-                                .frame(width: 200, alignment: .center)
-                            Text("输出")
-                                .frame(width: 200, alignment: .center)
-                        }
-                        ScrollView {
-                            ForEach(
-                                customPunctuationSettings.sorted(by: <),
-                                id: \.key) { (key, value) -> AnyView in
-                                AnyView(HStack(spacing: 0) {
-                                    Text(key)
-                                        .frame(width: 200, alignment: .center)
-                                    Picker("", selection: Binding<String>(
-                                        get: { value },
-                                        set: {
-                                            customPunctuationSettings[key] = $0
-                                        }
-                                    )) {
-                                        Text(key)
-                                            .tag(key)
-                                        Text(punctuation[key]!)
-                                            .tag(punctuation[key]!)
-                                    }
-                                    .frame(width: 200, alignment: .center)
-                                })
-                            }
-                                .padding(EdgeInsets(top: 6, leading: 20, bottom: 10, trailing: 20))
-                        }
-                        .frame(maxHeight: 300)
-                    }
-                    .padding(.top, 4)
-                    .background(Color(.sRGB, red: 0.4, green: 0.4, blue: 0.4, opacity: 0.2))
-                }
-                .disabled(punctuationMode != .custom)
+                PreferenceToggleRow(title: "数字/字母后标点自动转英文", caption: "连按两次转回中文", isOn: $enableDotAfterNumber)
+                PreferenceToggleRow(title: "数字后全角冒号转半角", caption: "适用于 12:45 时间场景", isOn: $enableColonAfterNumber)
+                PreferenceToggleRow(title: "标点顶屏", isOn: $enablePunctuationTopScreen)
+            } header: {
+                Text("标点方案")
             }
+            Section {
+                HStack {
+                    Text("按键")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    Text("输出")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+                ForEach(
+                    customPunctuationSettings.sorted(by: <),
+                    id: \.key) { (key, value) in
+                    HStack(spacing: 0) {
+                        Text(key)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                        Picker("", selection: Binding<String>(
+                            get: { value },
+                            set: {
+                                customPunctuationSettings[key] = $0
+                            }
+                        )) {
+                            Text(key)
+                                .tag(key)
+                            Text(punctuation[key] ?? key)
+                                .tag(punctuation[key] ?? key)
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                    .padding(.vertical, 2)
+                }
+            } header: {
+                Text("自定义符号")
+            }
+            .disabled(punctuationMode != .custom)
         }
+        .formStyle(.grouped)
     }
 }
 

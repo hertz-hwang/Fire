@@ -11,7 +11,7 @@ import AppKit
 import SwiftUI
 import Defaults
 
-struct ColorData: Codable {
+struct ColorData: Codable, Equatable {
     let red: Double
     let green: Double
     let blue: Double
@@ -123,7 +123,7 @@ extension Color {
     }
 }
 
-struct ApperanceThemeConfig: Codable {
+struct ApperanceThemeConfig: Codable, Equatable {
     let windowBackgroundColor: ColorData
     let windowPaddingTop: Float
     let windowPaddingLeft: Float

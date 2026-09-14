@@ -9,7 +9,6 @@
 //
 
 import SwiftUI
-import Settings
 import Defaults
 import Combine
 import UniformTypeIdentifiers
@@ -22,37 +21,37 @@ struct StatisticsPane: View {
     @StateObject private var calendarModel = InputCalendarModel()
     @StateObject private var hourModel = TodayHourDistributionModel()
     @StateObject private var detailModel = InputDetailsModel()
-    @StateObject private var wordFrequencyModel = WordFrequencyModel()
+    @StateObject private var charFrequencyModel = WordFrequencyModel(mode: .char)
+    @StateObject private var wordFrequencyModel = WordFrequencyModel(mode: .word)
 
     var body: some View {
-        Settings.Container(contentWidth: 520) {
-            Settings.Section(title: "") {
-                VStack(alignment: .leading, spacing: 12) {
-                    headerBar
-                    tabBar
-                    Divider()
-                    Group {
-                        switch selectedTab {
-                        case .summary:
-                            InputStatsView(model: summaryModel)
-                        case .calendar:
-                            InputCalendarView(model: calendarModel)
-                        case .hourDistribution:
-                            TodayHourDistributionView(model: hourModel) { hour in
-                                selectedTab = .details
-                                detailModel.setHourFilter(hour)
-                            }
-                        case .details:
-                            InputDetailsView(model: detailModel)
-                        case .wordFrequency:
-                            WordFrequencyView(model: wordFrequencyModel)
-                        }
+        VStack(alignment: .leading, spacing: 12) {
+            headerBar
+            tabBar
+            Divider()
+            Group {
+                switch selectedTab {
+                case .summary:
+                    InputStatsView(model: summaryModel)
+                case .calendar:
+                    InputCalendarView(model: calendarModel)
+                case .hourDistribution:
+                    TodayHourDistributionView(model: hourModel) { hour in
+                        selectedTab = .details
+                        detailModel.setHourFilter(hour)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                case .details:
+                    InputDetailsView(model: detailModel)
+                case .charFrequency:
+                    WordFrequencyView(model: charFrequencyModel)
+                case .wordFrequency:
+                    WordFrequencyView(model: wordFrequencyModel)
                 }
-                .frame(minHeight: 480)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var headerBar: some View {
@@ -181,6 +180,7 @@ enum StatsTab: String, CaseIterable, Identifiable {
     case calendar = "calendar"
     case hourDistribution = "hour"
     case details = "details"
+    case charFrequency = "charFrequency"
     case wordFrequency = "wordFrequency"
 
     var id: String { rawValue }
@@ -191,6 +191,7 @@ enum StatsTab: String, CaseIterable, Identifiable {
         case .calendar: return "输入日历"
         case .hourDistribution: return "今日时段"
         case .details: return "输入详情"
+        case .charFrequency: return "用户字频"
         case .wordFrequency: return "用户词频"
         }
     }
@@ -201,6 +202,7 @@ enum StatsTab: String, CaseIterable, Identifiable {
         case .calendar: return "calendar"
         case .hourDistribution: return "clock"
         case .details: return "list.bullet.rectangle"
+        case .charFrequency: return "character"
         case .wordFrequency: return "text.book.closed"
         }
     }

@@ -10,6 +10,29 @@ import SwiftUI
 import Defaults
 import AppKit
 
+// MARK: - 自定义毛玻璃背景（替代内置 .glassEffect()，实现圆角完全可控）
+
+struct GlassEffectView: NSViewRepresentable {
+    let cornerRadius: CGFloat
+    var blendingMode: NSVisualEffectView.BlendingMode = .withinWindow
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = blendingMode
+        view.material = .popover
+        view.state = .active
+        view.wantsLayer = true
+        view.layer?.cornerRadius = cornerRadius
+        view.layer?.masksToBounds = true
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.layer?.cornerRadius = cornerRadius
+        view.layer?.masksToBounds = true
+    }
+}
+
 func getShownCode(candidate: Candidate, origin: String) -> String {
     if candidate.type == CandidateType.py || !candidate.code.hasPrefix(origin) {
         return "(\(candidate.code))"
