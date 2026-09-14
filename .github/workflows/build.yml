@@ -2,9 +2,9 @@ name: build installer.pkg
 
 on:
   workflow_dispatch:
-    inputs: 
+    inputs:
       version:
-        description: "版本号 (如 v0.28.0)"
+        description: "版本号 (如 v0.28.1)"
         required: true
         type: string
       release_notes:
@@ -54,7 +54,7 @@ jobs:
           github-token: ${{ secrets.github_token }}
           skip-commit: "true"
           output-file: "false"
-      
+
       - name: combine donation and changelog
         id: combine_text
         env:
@@ -94,11 +94,11 @@ jobs:
 
     # - name: switch xcode version
     #   run: sudo xcode-select --switch /Applications/Xcode_14.3.1.app
-    
+
     - name: import application certificate
       id: keychain
       uses: apple-actions/import-codesign-certs@v2
-      with: 
+      with:
         p12-file-base64: ${{ secrets.CERTIFICATES_P12 }}
         p12-password: ${{ secrets.CERTIFICATES_P12_PASSWORD }}
 
@@ -149,7 +149,7 @@ jobs:
       contents: write # 创建 release 需要此权限
 
     if: needs.changelog.outputs.skipped == 'false'
-    
+
     steps:
       - uses: actions/checkout@v4
         with:
