@@ -11,7 +11,7 @@
 //  allowDuplicateSingle 开时允许 rank1 + 单字重码，关时只允许 rank1。
 //  显式选重的边不加 rank 轻罚、不加整码单字奖励（与 Lua 一致）。
 //
-//  编码以 [UInt8]（normalize 后保证全是 a-z;'0-9）贯穿解码。
+//  编码以 [UInt8]（normalize 后保证全是 a-zA-Z;'0-9，大小写敏感）贯穿解码。
 //
 
 import Foundation
@@ -436,18 +436,19 @@ final class SentenceDecoder {
         activeCorrections = nil
     }
 
-    /// normalize：小写 + 去空白，保留选重符 a-z;'0-9（虎整句 alphabet 同源）
+    /// normalize：去空白，保留 a-zA-Z;'0-9——大小写敏感（编码字符集同源虎整句
+    /// alphabet，但不折叠大小写）：大写按原样进码空间，码表里没有带大写字母的
+    /// 编码时自然解不出候选；组字区照常吸收大写键。
     static func normalize(_ raw: String) -> [UInt8]? {
         var bytes: [UInt8] = []
         bytes.reserveCapacity(raw.count)
         for scalar in raw.unicodeScalars {
             let value = scalar.value
             if value == 0x20 || value == 0x09 { continue }
-            if value >= 0x41 && value <= 0x5A {
-                bytes.append(UInt8(value + 32))
-            } else if (value >= 0x61 && value <= 0x7A)      // a-z
-                        || value == 0x3B || value == 0x27     // ; '
-                        || (value >= 0x30 && value <= 0x39) { // 0-9
+            if (value >= 0x41 && value <= 0x5A)      // A-Z
+                || (value >= 0x61 && value <= 0x7A)   // a-z
+                || value == 0x3B || value == 0x27     // ; '
+                || (value >= 0x30 && value <= 0x39) { // 0-9
                 bytes.append(UInt8(value))
             } else {
                 return nil // 其它字符不参与整句
@@ -457,7 +458,7 @@ final class SentenceDecoder {
     }
 
     private static func hasLetter(_ raw: [UInt8]) -> Bool {
-        for byte in raw where (97...122).contains(byte) {
+        for byte in raw where (65...90).contains(byte) || (97...122).contains(byte) {
             return true
         }
         return false

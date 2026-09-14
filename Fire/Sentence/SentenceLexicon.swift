@@ -306,12 +306,15 @@ final class SentenceLexicon {
                         loadedPath: loadedPath)
     }
 
+    /// 编码字符集：大小写敏感的 a-zA-Z。整句 normalize 不再折叠大小写，
+    /// 用户自定义方案表里若真有带大写字母的编码，按原样入边、可被大写查询命中；
+    /// 内置方案表全是小写，行为不变。
     @inline(__always)
     private func isSimpleCode(_ code: String) -> Bool {
         for scalar in code.unicodeScalars {
-            if scalar.value < 97 || scalar.value > 122 {
-                return false
-            }
+            let v = scalar.value
+            if (v >= 65 && v <= 90) || (v >= 97 && v <= 122) { continue }
+            return false
         }
         return !code.isEmpty
     }
