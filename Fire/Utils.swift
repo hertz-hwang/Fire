@@ -31,6 +31,11 @@ func fireLog(_ message: @autoclosure () -> String) {}
 class Utils {
     var toggleInputModeKeyUpChecker = ModifierKeyUpChecker(Defaults[.toggleInputModeKey])
 
+    // 固定方向切换检测：左Shift轻点切英文、右Shift轻点切中文(leftShiftToEnRightShiftToZh)
+    // 左右各用独立实例，互不干扰按下/抬起的计时状态
+    let leftShiftKeyUpChecker = ModifierKeyUpChecker(.leftShift)
+    let rightShiftKeyUpChecker = ModifierKeyUpChecker(.rightShift)
+
     var toast: ToastWindowProtocol?
 
     // 用于删除/组词等操作的小字文本提示，独立于中英文切换提示，不受 inputModeTipWindowType 影响

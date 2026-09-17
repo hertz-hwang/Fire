@@ -148,6 +148,9 @@ extension Defaults.Keys {
     static let disableTempEnMode = Key<Bool>("disableTempEnMode", default: false)
     // 切换英文模式的按键
     static let toggleInputModeKey = Key<ModifierKey>("toggleInputModeKey", default: ModifierKey.shift)
+    // 左Shift轻点切英文、右Shift轻点切中文（固定方向）；
+    // 开启后左右Shift均不再参与中/英互相轮换，非Shift的轮换快捷键（如control）不受影响
+    static let leftShiftToEnRightShiftToZh = Key<Bool>("leftShiftToEnRightShiftToZh", default: false)
     // 中英文切换提示弹窗位置
     static let inputModeTipWindowType = Key<InputModeTipWindowType>(
         "inputModeTipWindowType",

@@ -504,8 +504,32 @@ class FireInputController: IMKInputController {
 
      func flagChangedHandler(event: NSEvent) -> Bool? {
          fireLog("[FireInputController] flagChangedHandler")
+        // 固定方向切换: 左Shift轻点切英文、右Shift轻点切中文
+        // 开启后左右Shift均不再用于中/英互相轮换;
+        // 若轮换快捷键配置为非Shift键(如control)，该键的轮换仍照常生效
+        if !Defaults[.disableEnMode] && Defaults[.leftShiftToEnRightShiftToZh] {
+            let targetMode: InputMode?
+            if Utils.shared.leftShiftKeyUpChecker.check(event) {
+                targetMode = .enUS
+            } else if Utils.shared.rightShiftKeyUpChecker.check(event) {
+                targetMode = .zhhans
+            } else {
+                targetMode = nil
+            }
+            if let targetMode = targetMode {
+                fireLog("[FireInputController]shift fixed toggle: \(inputMode) -> \(targetMode)")
+                // 把当前未上屏的原始code上屏处理
+                insertText(_originalString)
+                Fire.shared.toggleInputMode(targetMode)
+                return true
+            }
+        }
         // 只有在shift keyup时，才切换中英文输入, 否则会导致shift+[a-z]大写的功能失效
-        if !Defaults[.disableEnMode] && Utils.shared.toggleInputModeKeyUpChecker.check(event) {
+        let toggleKey = Defaults[.toggleInputModeKey]
+        let rotationUsesShift = toggleKey == .shift || toggleKey == .leftShift || toggleKey == .rightShift
+        if !Defaults[.disableEnMode]
+            && !(Defaults[.leftShiftToEnRightShiftToZh] && rotationUsesShift)
+            && Utils.shared.toggleInputModeKeyUpChecker.check(event) {
             fireLog("[FireInputController]toggle mode: \(inputMode)")
 
             // 把当前未上屏的原始code上屏处理

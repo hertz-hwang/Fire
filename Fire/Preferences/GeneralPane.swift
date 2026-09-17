@@ -41,6 +41,7 @@ struct GeneralPane: View {
     @Default(.sentenceContextDepth) private var sentenceContextDepth
     @Default(.enableCharDivTip) private var enableCharDivTip
     @Default(.toggleInputModeKey) private var toggleInputModeKey
+    @Default(.leftShiftToEnRightShiftToZh) private var leftShiftToEnRightShiftToZh
     @Default(.disableEnMode) private var disableEnMode
     @Default(.disableTempEnMode) private var disableTempEnMode
     @Default(.showInputModeStatus) private var showInputModeStatus
@@ -317,6 +318,12 @@ struct GeneralPane: View {
                     .disabled(disableEnMode)
                 PreferenceToggleRow(title: "中文与英文/数字之间插入空格", isOn: $enableWhitespaceBetweenZhEn)
                 PreferenceToggleRow(title: "禁用;键临时英文模式", isOn: $disableTempEnMode)
+                PreferenceToggleRow(
+                    title: "左Shift切英文，右Shift切中文",
+                    caption: "开启后左右Shift不再互相轮换",
+                    isOn: $leftShiftToEnRightShiftToZh
+                )
+                .disabled(disableEnMode)
                 PreferencePickerRow(title: "中英文切换快捷键") {
                     Picker("", selection: $toggleInputModeKey) {
                         Text("control").tag(ModifierKey.control)
