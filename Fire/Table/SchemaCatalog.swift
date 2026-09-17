@@ -42,14 +42,17 @@ enum SchemaCatalog {
         Bundle.main.resourceURL?.appendingPathComponent("schemas").path ?? ""
     }
 
-    /// 当前所选码表能否走整句：仅虎/琉璃方案有配套整句码表。
+    /// 当前所选码表能否走整句：仅虎/琉璃/琉璃-友版方案有配套整句码表。
     /// 判定口径与 SentenceLexicon.resolveCodesFileName 一致：
     /// 文件名方案标记 → 内容嗅探（高频标记单字的码空间），两者都
     /// 不命中（五笔86/98、潇湘等）即无整句资源，设置面板禁用「整句」。
     static func supportsSentence(selectedTablePath: String) -> Bool {
         let name = (selectedTablePath as NSString).lastPathComponent.lowercased()
         var codesName: String?
-        if name.contains("tiger") || name.contains("虎") {
+        // 友版文件名含 "liuli" 子串，须先于琉璃分支判定
+        if name.contains("amrfliuli") || name.contains("友版") {
+            codesName = "sentence-codes-amrfliuli.txt"
+        } else if name.contains("tiger") || name.contains("虎") {
             codesName = "sentence-codes-tiger.txt"
         } else if name.contains("liuli") || name.contains("琉璃") || name.contains("小叮当") {
             codesName = "sentence-codes-liuli.txt"

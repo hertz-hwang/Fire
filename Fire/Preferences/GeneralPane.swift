@@ -99,7 +99,7 @@ struct GeneralPane: View {
         )
     }
 
-    /// 当前码表能否走整句（仅虎/琉璃有配套整句码表）。
+    /// 当前码表能否走整句（仅虎/琉璃/琉璃-友版有配套整句码表）。
     /// 仅码表方案参与判定：五笔86/98 等切过去后「整句」不可勾选。
     private var sentenceAvailableForTable: Bool {
         code != .wubi || SchemaCatalog.supportsSentence(selectedTablePath: wbTablePath)

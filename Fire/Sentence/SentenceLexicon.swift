@@ -4,7 +4,8 @@
 //
 //  整句词图边表（移植虎整句 build_lexicon_index 的精简版）。
 //  内置方案：形码模式整句码表按所选码表自动匹配（Resources/schemas 下
-//  sentence-codes-tiger.txt / sentence-codes-liuli.txt）；
+//  sentence-codes-tiger.txt / sentence-codes-liuli.txt /
+//  sentence-codes-amrfliuli.txt）；
 //  拼音模式直接使用所选拼音码表（schemas/py_table.txt）。
 //  与虎整句一致：不使用用户词覆盖层，rank 完全由码表文件序决定。
 //
@@ -153,18 +154,23 @@ final class SentenceLexicon {
     private var schemasDir: String { SchemaCatalog.schemasDirectory }
 
     /// 整句码表文件名：必须与所选码表同一编码方案。虎码 的=u，
-    /// 琉璃/小叮当码 的=d——错配时整句边表打不中任何按键码，表现为
-    /// 设置换码表后整句全部失效。按词库文件名标记 → 内容嗅探 依次判定。
+    /// 琉璃/小叮当/琉璃-友版码 的=d——错配时整句边表打不中任何按键码，
+    /// 表现为设置换码表后整句全部失效。按词库文件名标记 → 内容嗅探 依次判定。
     static func resolveCodesFileName() -> String {
         let wbPath = Defaults[.wbTablePath]
         let name = (wbPath as NSString).lastPathComponent.lowercased()
-        // 1. 文件名自带方案标记（liuli/tiger 及中文名），直接命中
+        // 1. 文件名自带方案标记（liuli/tiger 及中文名），直接命中；
+        //    "amrfliuli" 含 "liuli" 子串，友版分支必须先于琉璃判定
+        if name.contains("amrfliuli") || name.contains("友版") {
+            return "sentence-codes-amrfliuli.txt"
+        }
         if name.contains("tiger") || name.contains("虎") { return "sentence-codes-tiger.txt" }
         if name.contains("liuli") || name.contains("琉璃") || name.contains("小叮当") {
             return "sentence-codes-liuli.txt"
         }
         // 2. 内容嗅探：高频标记单字在各方案码空间里的编码（采样码表头部）
         //    琉璃空间 {的:d,是:j,不:k,了:l,我:w} 虎码空间 {的:u,是:o,不:c,了:r,我:t}
+        //    琉璃-友版与琉璃同码空间，嗅探无法区分：文件名无标记时归琉璃整句
         let marks: [(ch: Character, liuli: String, tiger: String)] = [
             ("的", "d", "u"), ("是", "j", "o"), ("不", "k", "c"),
             ("了", "l", "r"), ("我", "w", "t"), ("人", "s", "j"),
