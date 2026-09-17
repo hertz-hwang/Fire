@@ -78,6 +78,8 @@
 		AA5E0007000000000LRN007 /* ReplayTuner.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0007000000000LRN107 /* ReplayTuner.swift */; };
 		AA5E0008000000000LRN008 /* LearningPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0008000000000LRN108 /* LearningPane.swift */; };
 		AA5E0009000000000LRN009 /* LearningSerialization.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0009000000000LRN109 /* LearningSerialization.swift */; };
+		AA5E000C000000000LRN00C /* LearningDataReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000C000000000LRN10C /* LearningDataReport.swift */; };
+		AA7E0004000000000PRF004 /* LearningDataView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7E0004000000000PRF104 /* LearningDataView.swift */; };
 		AA7E0001000000000PRF001 /* NativePreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7E0001000000000PRF101 /* NativePreferencesView.swift */; };
 		AA7E0002000000000PRF002 /* PreferencePickerRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7E0002000000000PRF102 /* PreferencePickerRow.swift */; };
 		AA7E0003000000000PRF003 /* ThemeEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7E0003000000000PRF103 /* ThemeEditorView.swift */; };
@@ -173,6 +175,8 @@
 		AA7E0002000000000PRF102 /* PreferencePickerRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencePickerRow.swift; sourceTree = "<group>"; };
 		AA7E0003000000000PRF103 /* ThemeEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeEditorView.swift; sourceTree = "<group>"; };
 		AA5E0009000000000LRN109 /* LearningSerialization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningSerialization.swift; sourceTree = "<group>"; };
+		AA5E000C000000000LRN10C /* LearningDataReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningDataReport.swift; sourceTree = "<group>"; };
+		AA7E0004000000000PRF104 /* LearningDataView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningDataView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -349,6 +353,7 @@
 				67C9A02A2AB53ED3000B5281 /* ThemePane.swift */,
 				67C9A02B2AB53ED3000B5281 /* ThesaurusPane.swift */,
 				AA5E0008000000000LRN108 /* LearningPane.swift */,
+				AA7E0004000000000PRF104 /* LearningDataView.swift */,
 				67C9A02C2AB53ED3000B5281 /* PunctuationPane.swift */,
 			);
 			path = Preferences;
@@ -404,6 +409,7 @@
 				AA5E0005000000000LRN105 /* SessionCacheModel.swift */,
 				AA5E0007000000000LRN107 /* ReplayTuner.swift */,
 				AA5E0009000000000LRN109 /* LearningSerialization.swift */,
+				AA5E000C000000000LRN10C /* LearningDataReport.swift */,
 			);
 			path = Learning;
 			sourceTree = "<group>";
@@ -585,6 +591,8 @@
 				AA5E0007000000000LRN007 /* ReplayTuner.swift in Sources */,
 				AA5E0008000000000LRN008 /* LearningPane.swift in Sources */,
 				AA5E0009000000000LRN009 /* LearningSerialization.swift in Sources */,
+				AA5E000C000000000LRN00C /* LearningDataReport.swift in Sources */,
+				AA7E0004000000000PRF004 /* LearningDataView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -2,7 +2,9 @@
 //  LearningPane.swift
 //  Fire
 //
-//  学习系统设置面板：通道开关、强度、历史回填与数据清除。
+//  学习系统设置面板：通道开关、强度、历史回填与数据清除，
+//  以及「查看学习数据」入口（LearningDataWindow 明细浏览窗口）。
+//  「学习数据」分组不受总开关限制：关掉学习也能浏览/导出/清除存量。
 //  学习数据全部保存在本地加密库（user-learning.db），不上传。
 //
 
@@ -156,40 +158,63 @@ struct LearningPane: View {
             } header: {
                 Text("用词习惯学习")
             }
-            if enableLearning {
-                Section {
-                    Text(statusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    HStack {
-                        Button("立即落库") {
-                            LearnerCenter.shared.flushImmediately()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { refreshStatus() }
-                        }
-                        Button(backfillRunning ? "重建中…" : "回填历史数据") {
-                            runBackfill()
-                        }
-                        .disabled(backfillRunning)
-                        Button("清除学习数据") {
-                            clearData()
-                        }
+            // 学习数据区不受总开关限制：存量是既成事实，关掉学习系统也要能浏览、
+            // 导出和清除。只有写入通道 B 的「立即落库」「回填历史数据」需要先启用
+            // 学习系统（LearnerCenter 侧也有同样的开关判断），故单独置灰。
+            Section {
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    LearningDataWindow.open()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "list.bullet.rectangle")
+                        Text("查看学习数据")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
                     }
-                    HStack {
-                        Button("导出学习数据 (TCSKNM02)") {
-                            exportLearning()
-                        }
-                        Button("导入学习数据 (TCSKNM02)") {
-                            importLearning()
-                        }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("浏览字符 n-gram 计数与纠错对明细")
+                HStack {
+                    Button("立即落库") {
+                        LearnerCenter.shared.flushImmediately()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { refreshStatus() }
                     }
-                    Text("学习数据只保存在本机加密数据库，不会上传；撤销上屏（默认 Ctrl+U）会同步回退学习计数。导入导出覆盖字符 n-gram（TCSKNM02 分页格式），纠错对保留在本地库。")
+                    .disabled(!enableLearning)
+                    Button(backfillRunning ? "重建中…" : "回填历史数据") {
+                        runBackfill()
+                    }
+                    .disabled(backfillRunning || !enableLearning)
+                    Button("清除学习数据") {
+                        clearData()
+                    }
+                }
+                HStack {
+                    Button("导出学习数据 (TCSKNM02)") {
+                        exportLearning()
+                    }
+                    Button("导入学习数据 (TCSKNM02)") {
+                        importLearning()
+                    }
+                }
+                if !enableLearning {
+                    Text("学习系统已停用：仍可浏览、导出与清除已有数据；「立即落库」「回填历史数据」需要先启用学习系统。")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                } header: {
-                    Text("学习数据")
                 }
+                Text("学习数据只保存在本机加密数据库，不会上传；撤销上屏（默认 Ctrl+U）会同步回退学习计数。「查看学习数据」可浏览衰减后的字符 n-gram 计数与胜负纠错对明细并导出 CSV，清除 / 重建 / 导入后窗口自动刷新。导入导出覆盖字符 n-gram（TCSKNM02 分页格式），纠错对保留在本地库。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("学习数据")
             }
         }
         .formStyle(.grouped)

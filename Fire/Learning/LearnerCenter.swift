@@ -303,6 +303,7 @@ final class LearnerCenter {
             self.telemetry.backfilledRecords += processed
             self.telemetry.backfillFinished = true
             self.rebuildSnapshotLocked()
+            self.notifyDataReplaced()
             NSLog("[Learning] backfilled %d records (%ld rows consumed)", processed, consumedIds.count)
             progress?(processed, true)
         }
@@ -323,6 +324,9 @@ final class LearnerCenter {
                 sqlite3_exec(db, "UPDATE data SET learned = 0", nil, nil, nil)
                 sqlite3_close(db)
             }
+            // 先广播「已清空」：窗口开着时能立刻看到存量归零，
+            // 回填收尾时 backfill 会再广播一次最终结果
+            self.notifyDataReplaced()
             self.backfill(progress: progress)
         }
     }
@@ -356,6 +360,7 @@ final class LearnerCenter {
                 self.store.flush(ngramStore: self.ngramStore,
                                  correctionStore: self.correctionStore)
                 self.rebuildSnapshotLocked()
+                self.notifyDataReplaced()
                 NSLog("[Learning] imported n-gram data: %d entries", imported.entryCount)
                 completion(.success(imported.entryCount))
             } catch {
@@ -374,6 +379,7 @@ final class LearnerCenter {
             self.correctionStore = CorrectionStore()
             self.telemetry = Telemetry()
             self.rebuildSnapshotLocked()
+            self.notifyDataReplaced()
             // 注意：statistics.learned 标记有意保留——清除 = 真正的干净状态，
             // 历史不会在下一次启动时被自动回填回来；需要历史基线时用
             // 「回填历史数据」（全量重建）显式恢复
@@ -385,6 +391,19 @@ final class LearnerCenter {
     func flushImmediately() {
         queue.async { [weak self] in
             self?.flushNow()
+        }
+    }
+
+    // MARK: - 结构性变化通知
+
+    /// 学习数据被整体替换后通知 UI 重新取数（主线程发布）。
+    ///
+    /// 只在「存量整批变了」的场合发布：清除、全量重建、导入、回填收尾。
+    /// 日常记账刻意不发布——上屏频率太高，会把「查看学习数据」窗口
+    /// 拖成常驻的全表扫描。
+    private func notifyDataReplaced() {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .learningDataReplaced, object: nil)
         }
     }
 
@@ -409,4 +428,119 @@ final class LearnerCenter {
             completion(lines.joined(separator: "\n"))
         }
     }
+
+    // MARK: - 数据明细（设置面板「查看学习数据」）
+
+    /// 取学习数据明细供界面浏览。
+    ///
+    /// 在 fire.learning 串行队列上读：与记账/落库天然互斥，读到的是含防抖
+    /// 窗口内尚未落库计数的实时状态；纯读——不动计数、不触发衰减、不换代快照。
+    /// 全表扫描 + 排序的量级是条目数（上限 20 万），故放在后台队列，
+    /// completion 可能在后台线程交付，UI 侧自行派发主线程。
+    ///
+    /// - Parameters:
+    ///   - query: 关键词过滤，对行的显示文本做包含匹配；空 = 不过滤
+    ///   - limit: 每张表按计数降序保留的行数（`*Total` 仍是截断前的匹配总数）
+    func inspectData(query: String?, limit: Int,
+                     completion: @escaping (LearningDataReport) -> Void) {
+        queue.async { [weak self] in
+            guard let self = self else {
+                completion(LearningDataReport())
+                return
+            }
+            completion(Self.buildReport(ngram: self.ngramStore,
+                                        correction: self.correctionStore,
+                                        query: query, limit: limit))
+        }
+    }
+
+    /// 明细装配（无副作用，须在 queue 上调用）
+    private static func buildReport(ngram: UserCharNgramStore,
+                                    correction: CorrectionStore,
+                                    query: String?, limit: Int) -> LearningDataReport {
+        var report = LearningDataReport()
+        let keyword = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let limit = Swift.max(1, limit)
+        let tuning = LearningTuning.fromDefaults()
+        // 无关键词时恒真：走全量浏览路径
+        func matches(_ text: String) -> Bool { keyword.isEmpty || text.contains(keyword) }
+
+        report.unigramMass = ngram.unigramTotal
+        report.charEntries = ngram.unigrams.count
+        report.bigramEntries = ngram.bigrams.count
+        report.trigramEntries = ngram.trigrams.count
+        report.correctionEntries = correction.entryCount
+
+        // MARK: 通道 B 一元
+        var charRows: [LearningDataReport.CharRow] = []
+        for (key, count) in ngram.unigrams {
+            let text = LearningDataReport.text(for: key)
+            guard matches(text) else { continue }
+            charRows.append(.init(char: text, count: count))
+        }
+        report.charTotal = charRows.count
+        report.chars = topRows(charRows, by: \.count, limit: limit)
+
+        // MARK: 通道 B 二元
+        var bigramRows: [LearningDataReport.BigramRow] = []
+        for (key, count) in ngram.bigrams {
+            let (prev, next) = LearningDataReport.unpackBigram(key)
+            let prevText = LearningDataReport.text(for: prev)
+            let nextText = LearningDataReport.text(for: next)
+            guard matches(prevText) || matches(nextText) else { continue }
+            bigramRows.append(.init(prev: prevText, next: nextText, count: count,
+                                    total: ngram.bigramTotals[prev] ?? 0))
+        }
+        report.bigramTotal = bigramRows.count
+        report.bigrams = topRows(bigramRows, by: \.count, limit: limit)
+
+        // MARK: 通道 B 三元
+        var trigramRows: [LearningDataReport.TrigramRow] = []
+        for (key, count) in ngram.trigrams {
+            let (prev2, prev1, next) = LearningDataReport.unpackTrigram(key)
+            let ctx = LearningDataReport.contextText(prev2: prev2, prev1: prev1)
+            let nextText = LearningDataReport.text(for: next)
+            guard matches(ctx) || matches(nextText) else { continue }
+            let total = ngram.trigramTotals[NgramModel.pack2(UInt64(prev2), UInt64(prev1))] ?? 0
+            trigramRows.append(.init(ctx: ctx, next: nextText, count: count, total: total))
+        }
+        report.trigramTotal = trigramRows.count
+        report.trigrams = topRows(trigramRows, by: \.count, limit: limit)
+
+        // MARK: 通道 C1 纠错对：按胜+负的总证据量排序
+        var correctionRows: [LearningDataReport.CorrectionRow] = []
+        for (ctx, codes) in correction.entries {
+            for (code, words) in codes {
+                for (word, entry) in words {
+                    guard matches(ctx) || matches(code) || matches(word) else { continue }
+                    correctionRows.append(.init(
+                        ctx: ctx, code: code, word: word,
+                        wins: entry.wins, losses: entry.losses,
+                        bonus: CorrectionStore.bonus(wins: entry.wins,
+                                                     losses: entry.losses,
+                                                     tuning: tuning)))
+                }
+            }
+        }
+        report.correctionTotal = correctionRows.count
+        report.corrections = Array(correctionRows
+            .sorted { $0.wins + $0.losses > $1.wins + $1.losses }
+            .prefix(limit))
+        return report
+    }
+
+    /// 按计数降序截断到 limit
+    private static func topRows<Row>(_ rows: [Row], by value: KeyPath<Row, Double>,
+                                     limit: Int) -> [Row] {
+        Array(rows.sorted { $0[keyPath: value] > $1[keyPath: value] }.prefix(limit))
+    }
+}
+
+// MARK: - 通知
+
+extension Notification.Name {
+    /// 学习数据被整体替换：清除 / 全量重建 / 导入 / 回填收尾。
+    /// 「查看学习数据」窗口订阅它自动重新取数，免得在设置页操作完
+    /// 还要回窗口手动点刷新。
+    static let learningDataReplaced = Notification.Name("LearnerCenter.learningDataReplaced")
 }
