@@ -828,6 +828,10 @@ class FireInputController: IMKInputController {
                 _originalString = string
                 return true
             }
+            // 追加前 _sentenceActive / emptyCodePending 还是上一键留下的状态（didSet 未跑）。
+            // 收窄门控：只有上一键整句仍有候选、或会话里仍留有挂起的空码捕获，
+            // 才继续把键喂给自动上屏；整句分支已松手（回落普通词候选且无捕获）则不喂。
+            let sentenceAliveBeforeKey = _sentenceActive || _sentenceSession.emptyCodePending != nil
             _originalString += string
 
             // 整句自动上屏：先空码型，再概率型。
@@ -835,9 +839,11 @@ class FireInputController: IMKInputController {
             // `date`）时不自动上屏，等编码完整命中后置顶让用户选择。
             // 门控不能只看 _sentenceActive：本键使编码变为空码时，didSet 里先跑的
             // updateCandidates 会因整句解码为空回落普通词候选，把 _sentenceActive
-            // 置 false（如琉璃 fl+o → flo），空码上屏会永远等不到这一键——
-            // 只要整句分支仍拥有该组字区，就照常喂键。
-            if _sentenceActive || sentenceBranchAllowed() {
+            // 置 false（如琉璃 fl+o → flo），空码上屏会永远等不到这一键。
+            // 但补判也不能宽成"引擎可用就喂"：死码段会白白累计键数/证据，
+            // 出字时机也可能被不相干的键带偏；只保留"上一键还活着"的一键续喂窗口
+            // （emptyCodePending 覆盖捕获后暂缓截断、跨键等待出字的链式场景）。
+            if _sentenceActive || (sentenceBranchAllowed() && sentenceAliveBeforeKey) {
                 let raw = _originalString
                 if DictManager.shared.hasUserDictPrefix(matching: raw) {
                     SentenceEngine.shared.evidenceInvalidated(_sentenceSession)
