@@ -231,6 +231,8 @@ enum ReplayTuner {
         }
 
         // 会话切分与上下文复现
+        // 离线回放没有光标也没有文档可读，语境只能按「最近 N 段上屏文字」近似
+        // （在线输入已是「光标前最近 N 个汉字」，见 SentenceSession.cursorContext）
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
         formatter.timeZone = .current

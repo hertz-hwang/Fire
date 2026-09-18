@@ -334,7 +334,8 @@ final class SentenceDecoder {
     /// 增量 lattice 缓存
     private var cachedRaw: [UInt8] = []
     private var cachedBuckets: [SentenceBucket?] = []
-    /// 构建 lattice 时用的左上下文（自动上屏留存文本）；变了必须整体重解码
+    /// 构建 lattice 时用的左上下文（光标前语境，兜底为上屏留存文本）；
+    /// 变了必须整体重解码
     private var cachedContext: String = ""
     /// lattice 构建时的词表代数；换词库后必须整体重解码
     private var cachedLexiconGeneration: Int = -1
@@ -872,7 +873,7 @@ final class SentenceDecoder {
 
     /// 整句解码。append：从 `oldN + 1 - maxConsume` 起扩展并禁止产生
     /// consumedEnd ≤ oldN 的新边；delete：直接砍尾部桶。
-    /// context：自动上屏留存的左上下文文字（「N-gram留存信息数」）。
+    /// context：组句的左上下文文字（「N-gram语境字数」，取光标前最近 0~2 个汉字）。
     /// 只喂给 n-gram 与 supplement 做历史（prev2/prev1 seed + AC 状态推进），
     /// 不进候选文字、不计 score/mass——左上下文对同一输入下所有候选同等生效。
     func decode(_ rawCode: String, includeEarlyCommit: Bool = false,
@@ -991,9 +992,9 @@ final class SentenceDecoder {
                                    context: String) -> [SentenceBucket?] {
         let length = raw.count
         var fresh: [SentenceBucket?] = Array(repeating: nil, count: length + 1)
-        // 左上下文 seed：prev2/prev1 = 留存文本末尾两字（不足补 BOS），
-        // supplement 匹配状态沿留存文本推进——跨上屏边界的新词也能接住。
-        // 留存文字不产出候选、不计分，只做语言模型历史。
+        // 左上下文 seed：prev2/prev1 = 语境末尾两字（不足补 BOS），
+        // supplement 匹配状态沿语境推进——跨上屏边界的新词也能接住。
+        // 语境文字不产出候选、不计分，只做语言模型历史。
         var prev2 = NgramModel.bos
         var prev1 = NgramModel.bos
         var supState = 0

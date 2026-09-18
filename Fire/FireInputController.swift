@@ -110,6 +110,11 @@ class FireInputController: IMKInputController {
 
     private var _originalString = "" {
         didSet(oldValue) {
+            if oldValue.isEmpty && !_originalString.isEmpty {
+                // 组字开始（自动上屏后保留尾码续组字也走这里：那次上屏的
+                // clean() 刚把编码清空）：读一次光标前语境，整段组字期内复用
+                refreshSentenceContext()
+            }
             if oldValue != _originalString {
                 // 编码变化即重置整句高亮位与页码
                 _sentenceHighlightIndex = 0
@@ -229,6 +234,51 @@ class FireInputController: IMKInputController {
             return ""
         }
         return client().attributedSubstring(from: NSMakeRange(previousLocation, count))?.string ?? ""
+    }
+
+    /// 整句 n-gram 左上下文：从光标插入点向前取最多 `count` 个汉字。
+    /// 非汉字（标点/空格/英文/数字）跳过不计，只向前回看一小扇窗口；
+    /// 位置不可信或读不到文本（应用不实现 attributedSubstring、无权限）
+    /// 返回空串，由 SentenceSession.contextText 回落到本会话上屏文字。
+    private func leftContextHanText(_ count: Int) -> String {
+        guard count > 0, let client = client() else { return "" }
+        let selected = client.selectedRange()
+        // 部分应用把 location 报成 NSNotFound / 天文数字，这类位置不可信
+        guard selected.location != NSNotFound, selected.location >= 0,
+              selected.location < 1_000_000 else { return "" }
+        // 组字区不算语境：不同 App 的光标基准不一致（备忘录 location 在组字区后、
+        // Chrome 在组字区前），与 getPreviousText 一样按合成区长度剥离
+        var marked = client.markedRange()
+        if marked.location > 1_000_000 { marked = NSRange(location: 0, length: 0) }
+        var anchor = selected.location
+        if anchor >= marked.location + marked.length {
+            anchor -= marked.length
+        }
+        guard anchor > 0 else { return "" }   // 文档开头：光标前没有文字
+        // 一次读回一扇窗口再向前筛，避免逐字多次 IPC
+        let window = min(anchor, max(count * 6, 12))
+        guard let text = client.attributedSubstring(
+            from: NSRange(location: anchor - window, length: window))?.string,
+            !text.isEmpty else { return "" }
+        var picked: [Character] = []
+        for ch in text.reversed() {
+            guard ch.isChineseChar else { continue }
+            picked.append(ch)
+            if picked.count == count { break }
+        }
+        return String(picked.reversed())
+    }
+
+    /// 刷新整句左上下文：读一次光标前语境塞进会话。
+    /// 只在组字开始与会话重置后调用——一次组字期内光标不动，逐键重读
+    /// 既多一次 IPC，光标抖动还会让解码器的增量 lattice 反复整体作废。
+    private func refreshSentenceContext() {
+        guard Defaults[.enableSentenceMode] else {
+            _sentenceSession.cursorContext = ""
+            return
+        }
+        let depth = min(2, max(0, Defaults[.sentenceContextDepth]))
+        _sentenceSession.cursorContext = depth > 0 ? leftContextHanText(depth) : ""
     }
 
     // ---- handlers begin -----
@@ -1189,6 +1239,9 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                     SentenceEngine.shared.resetSession(_sentenceSession)
                     _sentenceSession.engineEpoch = SentenceEngine.shared.epoch
                     _sentenceSession.lexiconGeneration = SentenceLexicon.shared.generation
+                    // resetSession 清空了光标前语境（滑杆改语境字数也会走到这里），
+                    // 当前编码还在继续组字，立刻补读一次
+                    refreshSentenceContext()
                 }
                 if let result = SentenceEngine.shared.candidates(
                     session: _sentenceSession, raw: _originalString) {
@@ -1709,6 +1762,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
     func clearCommitUndoRecords() {
         _committedRecords.removeAll()
         _sentenceSession.decoder.cacheModel.clear()
+        // 换输入框 = 换文档：光标前语境作废，下一次组字重读
+        _sentenceSession.cursorContext = ""
     }
 
     /// 撤消上屏：回退最近一次上屏的文字（Ctrl+U 默认）。
@@ -1794,6 +1849,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
            last == text {
             _sentenceSession.contextSegments.removeLast()
         }
+        // 文档被改（撤销上屏）：光标前语境作废，下一次组字重读
+        _sentenceSession.cursorContext = ""
         return true
     }
 }

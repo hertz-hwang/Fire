@@ -193,7 +193,7 @@ struct GeneralPane: View {
                         // 拼音方案固定启用（词表侧已按 rank 截断防爆）
                         .disabled(isPinyin)
                     HStack(spacing: 8) {
-                        Text("N-gram留存信息数")
+                        Text("N-gram语境字数")
                         Slider(value: Binding(
                             get: { Double(sentenceContextDepth) },
                             set: { sentenceContextDepth = Int($0) }
@@ -203,7 +203,7 @@ struct GeneralPane: View {
                         Text("\(sentenceContextDepth)")
                             .frame(width: 20, alignment: .trailing)
                     }
-                    Text("0：不留存；1：保留前一次上屏文本的信息；2：保留前两次上屏文本的信息，用于后续组句的语境")
+                    Text("0：不取语境；1：取光标前最近 1 个汉字；2：取光标前最近 2 个汉字，作为后续组句的语境（标点/英文跳过不计；读不到输入框文本时回落到最近上屏的文字）")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

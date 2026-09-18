@@ -38,17 +38,28 @@ final class SentenceSession {
     // 空码上屏
     var emptyCodePending: SentenceEmptyPending?
 
-    /// 最近自动上屏的文字片段（旧→新，最多存 2 段 = 留存数上限）。
-    /// 自动上屏后作为 n-gram 左上下文喂回解码器，让后续编码接着语境组句
+    /// 兜底语境：最近上屏的文字片段（旧→新，最多存 2 段）。
+    /// 只在读不到输入框文本时（应用不支持 attributedSubstring、
+    /// 无辅助功能权限）顶上，避免跨上屏组句语境整个失效
     /// （「回」已上屏，再打 gbmqbk 才能组出承前的句子）。
     /// 不受 resetAll 影响：上屏的文字已进文档，clean/换码都不该丢这个语境。
     var contextSegments: [String] = []
 
-    /// 按「N-gram留存信息数」（0/1/2）实时裁剪的左上下文文本
+    /// 左上下文主来源：本次组字开始时从光标插入点向前读的最近 N 个汉字
+    /// （「N-gram语境字数」0/1/2）。由 controller 在组字开始/会话重置时刷新，
+    /// 一次组字期内复用同一份值——逐键重读既多一次 IPC，光标抖动还会
+    /// 让解码器的增量 lattice 反复整体作废。
+    var cursorContext: String = ""
+
+    /// 组句用的左上下文：优先取光标前文本，取不到时回落历史上屏文字。
+    /// 按语境字数（0/1/2）实时裁剪：滑杆调小立刻生效，不必等下一次组字。
     var contextText: String {
         let depth = min(2, max(0, Defaults[.sentenceContextDepth]))
-        guard depth > 0, !contextSegments.isEmpty else { return "" }
-        return contextSegments.suffix(depth).joined()
+        guard depth > 0 else { return "" }
+        guard !cursorContext.isEmpty else {
+            return contextSegments.suffix(depth).joined()
+        }
+        return String(cursorContext.suffix(depth))
     }
 
     func recordContext(_ text: String) {
@@ -81,6 +92,9 @@ final class SentenceSession {
         lastAutoCommitRawLength = 0
         emptyCodePending = nil
         sessionKeyCount = 0
+        // 文档变过（上屏/撤销/换输入框）：光标前语境必须重读，
+        // 由 controller 在下一次组字开始时刷新
+        cursorContext = ""
     }
 }
 
