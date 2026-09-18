@@ -151,12 +151,35 @@ func stateBetterScoreFirst(_ left: SentenceState, _ right: SentenceState) -> Boo
     return left.score > right.score
 }
 
+// MARK: - 候选级比较器（emit 终排序）
+
+/// 与状态级同语义，但比的是 SentenceCompleted.score——即**含结尾 EOS** 的最终分。
+/// emit 必须用这一对：`path.score` 是加 EOS 之前的状态分，拿它排最终顺序会让
+/// 候选栏顺序与「显示打分」的总分自相矛盾（分数低的排前面），也会让
+/// contextDecisiveLead 的阈值判断和它要驱动的顺序脱节。
+/// Lua emit 正是把 evaluate_state 之后的候选喂 select_exact_top（同源行为）。
+@inline(__always)
+func completedBetterRankFirst(_ left: SentenceCompleted, _ right: SentenceCompleted) -> Bool {
+    if left.maxRank != right.maxRank { return left.maxRank < right.maxRank }
+    if left.score == right.score { return left.text < right.text }
+    return left.score > right.score
+}
+
+@inline(__always)
+func completedBetterScoreFirst(_ left: SentenceCompleted, _ right: SentenceCompleted) -> Bool {
+    if left.score == right.score {
+        if left.maxRank != right.maxRank { return left.maxRank < right.maxRank }
+        return left.text < right.text
+    }
+    return left.score > right.score
+}
+
 // MARK: - 最劣堆 top-k（Lua select_exact_top），O(n log k)
 
-func selectExactTop(_ values: [SentenceState], limit: Int,
-                    better: (SentenceState, SentenceState) -> Bool) -> [SentenceState] {
+func selectExactTop<T>(_ values: [T], limit: Int,
+                       better: (T, T) -> Bool) -> [T] {
     guard limit > 0 else { return [] }
-    var heap: [SentenceState] = []
+    var heap: [T] = []
     heap.reserveCapacity(limit)
 
     func siftUp(_ index: Int) {
@@ -639,9 +662,30 @@ final class SentenceDecoder {
 
     // MARK: - emit（Lua emit）
 
+    /// 语境压倒性领先（对「整码单字按词库序」的受控例外）。
+    ///
+    /// 整段单边（一个码出一个字）场景本来恒走 rank-first：形码的「码→首选字」
+    /// 由码表说了算，不该随语境漂。但码表序是无语境的先验，语境真把某个非首选
+    /// 字顶起来时，继续把它按在第 2 位就纯属码表惯性——「安」+ `edf` 里
+    /// 通用模型给 安逸 比 安连 高 5.9 nat（≈360:1），首选仍是 连。
+    ///
+    /// 判据：分数序首选 ≠ 词库序首选，且前者领先 ≥ contextDecisiveLeadNats。
+    /// 只在原本会落进 rank-first 分支时调用（分段路径/纠错记录已经分数优先），
+    /// 且只重排可见候选顺序——massScore/提前上屏证据一律不动。
+    private func contextDecisiveLead(_ candidates: [SentenceCompleted],
+                                     hasLeftContext: Bool) -> Bool {
+        guard hasLeftContext, candidates.count > 1 else { return false }
+        guard let lexiconTop = candidates.min(by: completedBetterRankFirst),
+              let scoreTop = candidates.min(by: completedBetterScoreFirst),
+              scoreTop.text != lexiconTop.text else { return false }
+        return scoreTop.score - lexiconTop.score
+            >= SentenceConfig.contextDecisiveLeadNats
+    }
+
     fileprivate func emit(_ raw: [UInt8], _ buckets: inout [SentenceBucket?], length: Int,
                          includeEarlyCommit: Bool,
-                         allowDuplicateSingle: Bool) -> SentenceDecodeResult {
+                         allowDuplicateSingle: Bool,
+                         hasLeftContext: Bool) -> SentenceDecodeResult {
         let completedBucket = (buckets[length] ?? SentenceBucket())
             .dedup(limit: beamLimitAt(length), better: stateBetterScoreFirst)
         buckets[length] = completedBucket
@@ -677,21 +721,21 @@ final class SentenceDecoder {
         // 该输入存在纠错记录时强制分数竞争：纠错语义就是"同码下我要另一个"，
         // rank-first 会把纠错加分全部埋掉
         // （Lua prefer_score_over_lexicon_rank：allow 关时恒 rank-first）
+        // 第三个例外见 contextDecisiveLead：有左上下文且模型压倒性领先时，
+        // 整码单字重码也交给分数裁决
         let hasSegmentedPath = all.contains {
             $0.path.previous != nil && $0.path.previous!.rawLength > 0
         }
-        let better = (allowDuplicateSingle && hasSegmentedPath) || activeCorrections != nil
-            ? stateBetterScoreFirst : stateBetterRankFirst
+        let rankBranch = !(allowDuplicateSingle && hasSegmentedPath) && activeCorrections == nil
+        let contextLead = rankBranch && contextDecisiveLead(all, hasLeftContext: hasLeftContext)
+        let scoreFirst = !rankBranch || contextLead
+        let better: (SentenceCompleted, SentenceCompleted) -> Bool =
+            scoreFirst ? completedBetterScoreFirst : completedBetterRankFirst
         var result = all
         if result.count > SentenceConfig.candidateLimit {
-            // 最劣堆按 path 选，再按同一 better 映射回候选
-            let states = selectExactTop(all.map { $0.path },
-                                         limit: SentenceConfig.candidateLimit, better: better)
-            var byIdentity = [ObjectIdentifier: SentenceCompleted]()
-            for candidate in all { byIdentity[ObjectIdentifier(candidate.path)] = candidate }
-            result = states.compactMap { byIdentity[ObjectIdentifier($0)] }
+            result = selectExactTop(all, limit: SentenceConfig.candidateLimit, better: better)
         } else {
-            result.sort { better($0.path, $1.path) }
+            result.sort(by: better)
         }
 
         var evidence = SentenceEarlyEvidence()
@@ -704,7 +748,8 @@ final class SentenceDecoder {
                                                 visible: result,
                                                 poolTruncated: completedBucket.truncated)
         }
-        return SentenceDecodeResult(candidates: result, evidence: evidence)
+        return SentenceDecodeResult(candidates: result, evidence: evidence,
+                                    orderedByContextLead: contextLead)
     }
 
     // MARK: - 提前上屏证据（Lua build_early_commit_evidence / build_prefix_evidence）
@@ -953,7 +998,8 @@ final class SentenceDecoder {
         var finalBuckets = buckets!
         let result = emit(raw, &finalBuckets, length: length,
                           includeEarlyCommit: includeEarlyCommit,
-                          allowDuplicateSingle: allowDuplicate)
+                          allowDuplicateSingle: allowDuplicate,
+                          hasLeftContext: !context.isEmpty)
 
         cachedRaw = raw
         cachedBuckets = finalBuckets
@@ -1028,7 +1074,8 @@ final class SentenceDecoder {
         var fresh = buildFreshBuckets(raw, allowDuplicateSingle: allowDuplicateSingle,
                                        context: context)
         return emit(raw, &fresh, length: raw.count, includeEarlyCommit: includeEarlyCommit,
-                    allowDuplicateSingle: allowDuplicateSingle)
+                    allowDuplicateSingle: allowDuplicateSingle,
+                    hasLeftContext: !context.isEmpty)
     }
 }
 

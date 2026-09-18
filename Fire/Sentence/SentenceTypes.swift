@@ -35,6 +35,12 @@ enum SentenceConfig {
     static let emittedCharacterReward = 2.0
     /// 整段命中单一最优单字边的额外奖励
     static let wholeInputSingleCharacterReward = 5.0
+    /// 语境压倒性领先阈值（nat）：整码单字重码本该按词库序出字，但左上下文
+    /// 非空且模型对某个非首选字的领先超过此值时，改由分数裁决。
+    /// 3 nat ≈ 后验 20:1（等价 p(挑战者)/p(码表首选) ≥ 0.95），是"模型确实在
+    /// 说话"而不是"排序抖动"的量级：实测（琉璃码表 + mobile 模型，3000 组
+    /// 真实码×单字语境）分差中位 2.33、p90 9.53，3 nat 放行 3.8% 的解码。
+    static let contextDecisiveLeadNats = 3.0
 
     // ---- 提前上屏（概率型）----
     /// 前缀成为合格证据的后验占比门槛
@@ -205,6 +211,10 @@ struct SentenceEmptyPending {
 struct SentenceDecodeResult {
     var candidates: [SentenceCompleted]
     var evidence: SentenceEarlyEvidence
+    /// 本次顺序是被「语境压倒性领先」例外改的（整码单字重码本该按词库序）。
+    /// 置位时 rank1 已不是用户看见的首选，依赖"隐式首选 = rank≤1"的兜底路径
+    /// （空码上屏）必须换一套资格口径，否则会显示 A 上屏 B。
+    var orderedByContextLead: Bool = false
 }
 
 /// 整句自动上屏的结果：上屏文字 + 组字区保留的原始编码。

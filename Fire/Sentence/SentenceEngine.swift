@@ -554,8 +554,12 @@ final class SentenceEngine {
                                               context: session.contextText)
         guard !decoded.candidates.isEmpty else { return nil }
         let visibleTop = decoded.candidates[0]
-        // 虎整句：编码里带显式选重符时全 rank 都有资格；否则只认隐式首选
+        // 虎整句：编码里带显式选重符时全 rank 都有资格；否则只认隐式首选。
+        // 语境压倒性领先改序（contextDecisiveLead）时同样放开资格：那一刻 rank1 已经
+        // 不是用户看见的首选，再拿 maxRank ≤ 1 当兜底文字会「候选栏显示 A、上屏 B」；
+        // 放开后由下面的后验占比闸门把关，不够压倒性就不上屏（宁缺不错）
         let restrict = !Selector.hasSelectionSuffix(Array(fullBefore.utf8))
+            && !decoded.orderedByContextLead
         let eligible = restrict
             ? decoded.candidates.filter { $0.maxRank <= 1 }
             : decoded.candidates
