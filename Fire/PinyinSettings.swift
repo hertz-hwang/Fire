@@ -37,24 +37,30 @@ final class PinyinEngineCenter {
     /// 面板只管写 Defaults、不直接戳引擎——不然「面板改了、控制器还拿旧配置」
     /// 这类不一致迟早出现在某个没人点到的角落。
     private init() {
+        // 三个 observe 都不要 [.initial]：默认会在注册时立刻回调一次，
+        // 于是「第一次碰到 PinyinEngineCenter」就把学习系统（LearnerCenter →
+        // statistics.db → Keychain）整条拉起来。从命令行跑自检时这会在
+        // Keychain 授权上挂死（实测 Release 目录里那份就卡住了）。
+        // 配置的对齐本来就有显式入口：applySettings / prepareIfNeeded / beginQuery。
         Defaults.observe(keys: .pinyinLayout, .pinyinCustomTable,
-                         .pinyinFuzzyRules, .pinyinTypoCorrection) { [weak self] in
+                         .pinyinFuzzyRules, .pinyinTypoCorrection,
+                         options: []) { [weak self] in
             self?.applySettings()
         }
         .tieToLifetime(of: self)
-        Defaults.observe(keys: .pyTablePath) { [weak self] in
+        Defaults.observe(keys: .pyTablePath, options: []) { [weak self] in
             guard let self else { return }
             self.reload()
             self.prepareIfNeeded()
         }
         .tieToLifetime(of: self)
-        Defaults.observe(keys: .sentenceModelPath) { [weak self] in
+        Defaults.observe(keys: .sentenceModelPath, options: []) { [weak self] in
             // 换 ngram 模型：格子分数与词级先验全部过期
             self?.engine.clearCaches()
         }
         .tieToLifetime(of: self)
         Defaults.observe(keys: .enableLearning, .enableLearningUserNgram,
-                         .enableLearningSessionCache) { [weak self] in
+                         .enableLearningSessionCache, options: []) { [weak self] in
             self?.refreshLearningFlags()
         }
         .tieToLifetime(of: self)
@@ -88,6 +94,7 @@ final class PinyinEngineCenter {
     /// 控制器每次查询前报上会话，并把学习状态对齐一次（代次比较，常数级）
     func beginQuery(session: SentenceSession) {
         activeSession = session
+        refreshUserWeightsIfNeeded()
         refreshLearningFlags()
     }
 
@@ -112,8 +119,17 @@ final class PinyinEngineCenter {
             return score
         }
         engine.weightProvider = { [weak self] text in self?.userWeights[text] ?? 0 }
+    }
+
+    /// 加权词表：只在拼音真的在用（`beginQuery`）时才查用户词库——
+    /// 它开 sqlite，不该被「有人读了单例」这种理由拉起来。
+    private func refreshUserWeightsIfNeeded() {
+        if userWeightsLoaded { return }
+        userWeightsLoaded = true
         refreshUserWeights()
     }
+
+    private var userWeightsLoaded = false
 
     /// 学习开关 / 快照代次对齐。逐字钩子里不做这些（每键要问上千次），
     /// 只在这次查询开头问一次。
