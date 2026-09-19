@@ -133,22 +133,18 @@ public struct ShuangpinEditorView: View {
             Spacer()
             Button("取消") { onFinish(false, nil) }
             Button("保存") {
-                if !editor.unboundFinals().isEmpty {
-                Text("还有 \(editor.unboundFinals().count) 个韵母没给键位：\(editor.unboundFinals().prefix(12).joined(separator: " "))")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if !ambiguous.isEmpty {
-                Text("一对键撞在多个零声母音节上：\(ambiguous.map { "\($0.keys)=\($0.readings.joined(separator: "/"))" }.joined(separator: " "))")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if !unencodable.isEmpty {
-                    let samples = unencodable.prefix(3).joined(separator: " / ")
-                    let count = unencodable.count
-                    alertText = "还有 \(count) 个音节编不成两键（例如 \(samples)），保存后这些音打不出来。确认继续？"
+                // 两类硬伤都只拦一次（确认后仍可保存）：缺韵母键位 = 那些音根本打不出来，
+                // 编不成两键 = 那些音节在这个方案下没有写法。
+                var problems: [String] = []
+                let unbound = editor.unboundFinals()
+                if !unbound.isEmpty {
+                    problems.append("\(unbound.count) 个韵母还没给键位（\(unbound.prefix(3).joined(separator: " "))…）")
+                }
+                if !unencodable.isEmpty {
+                    problems.append("\(unencodable.count) 个音节编不成两键（\(unencodable.prefix(3).joined(separator: " / "))…）")
+                }
+                guard problems.isEmpty else {
+                    alertText = problems.joined(separator: "；") + "。保存后这些音打不出来，确认继续？"
                     return
                 }
                 onFinish(true, table)
@@ -427,11 +423,18 @@ private struct KeyDropHandler: DropDelegate {
 /// 编辑器窗口（与「学习数据」窗口同款：单例 + isReleasedWhenClosed = false）
 public enum ShuangpinEditorWindow {
     private static var window: NSWindow?
+
+    /// 关闭即清静态引用：下次打开重新按**当前已保存的键位表**建窗口。
+    /// 留着不清，「取消 → 再点编辑键位」会把刚刚丢掉的那份编辑又摆回屏幕上。
     private final class Handler: NSObject, NSWindowDelegate {
-        func windowWillClose(_ notification: Notification) {}
+        func windowWillClose(_ notification: Notification) {
+            guard let win = notification.object as? NSWindow else { return }
+            if win === ShuangpinEditorWindow.window { ShuangpinEditorWindow.window = nil }
+        }
     }
     private static let handler = Handler()
 
+    /// 入口（偏好设置「编辑键位…」按钮调）
     static func open() {
         if let window {
             window.makeKeyAndOrderFront(nil)
@@ -465,6 +468,64 @@ public enum ShuangpinEditorWindow {
     }
 }
 
+
+/// 编辑器窗口的入口自检（命令行 `Fire --shuangpin-editor-selftest`，跑完即退）。
+///
+/// 「编辑键位点不开」这种毛病错在接线而不是错在逻辑：按钮设了个没人读的状态、
+/// 窗口建了没排到屏前，代码读着全对。所以这里真走一遍入口：开窗口、确认它到了屏前、
+/// 确认二次入口不重复建窗、关掉后确认静态引用清了（不清，下次打开还是那份被丢掉的编辑）。
+enum ShuangpinEditorWindowSelfCheck {
+    private static let title = "自定义双拼键位"
+
+    static func run() {
+        var failures = 0
+        func expect(_ ok: Bool, _ what: String) {
+            print("[shuangpin-editor] \(ok ? "PASS" : "FAIL") \(what)")
+            if !ok { failures += 1 }
+        }
+        let savedLayout = Defaults[.pinyinLayout]
+        let savedTable = Defaults[.pinyinCustomTable]
+        // 没有已保存的键位表也要能开：回落小鹤，别给个空键盘
+        Defaults[.pinyinCustomTable] = ""
+        ShuangpinEditorWindow.open()
+        let opened = visibleEditorWindows()
+        expect(opened.count == 1, "open() 后屏前有一扇「\(title)」窗口（实得 \(opened.count)）")
+        let firstWindow = opened.first
+        expect(firstWindow?.contentView is NSHostingView<ShuangpinEditorView>,
+               "窗口内容是键位编辑器本体")
+        // 再点一次入口：只把那扇拉到前面，不叠第二扇
+        ShuangpinEditorWindow.open()
+        expect(visibleEditorWindows().count == 1, "重复 open() 不叠第二扇窗口")
+        // 关掉必须清掉静态引用，否则下次打开拿到的是上次丢掉的那份编辑
+        for window in visibleEditorWindows() { window.close() }
+        expect(visibleEditorWindows().isEmpty, "close() 后窗口不再屏前")
+        // 清完再开：重新按当前设置建窗口，内容跟着新的键位表走
+        var custom = ShuangpinTables.xiaohe
+        custom.finals = custom.finals.map { entry in
+            var next = entry
+            if entry.key == "k" { next.finals = ["uai"] }
+            return next
+        }
+        Defaults[.pinyinCustomTable] = (try? JSONEncoder().encode(custom)).flatMap {
+            String(data: $0, encoding: .utf8)
+        } ?? ""
+        ShuangpinEditorWindow.open()
+        let reopened = visibleEditorWindows()
+        // 重建而不是拉回旧窗口：静态引用没清的话这里拿回的仍是上一轮点了「取消」那一份编辑
+        expect(reopened.count == 1 && reopened.first !== firstWindow,
+               "关掉后重新 open() 重建窗口（不是把旧那份拉回屏前）")
+        for window in visibleEditorWindows() { window.close() }
+        Defaults[.pinyinLayout] = savedLayout
+        Defaults[.pinyinCustomTable] = savedTable
+        print("[shuangpin-editor] 键位编辑器入口自检：\(failures == 0 ? "全部通过" : "\(failures) 项失败")")
+        exit(failures == 0 ? 0 : 1)
+    }
+
+    /// 屏前的键位编辑器窗口
+    private static func visibleEditorWindows() -> [NSWindow] {
+        NSApp.windows.filter { $0.title == title && $0.isVisible }
+    }
+}
 
 /// 离屏渲染预览（调试：`Fire --preview-shuangpin [输出目录]`）。
 ///

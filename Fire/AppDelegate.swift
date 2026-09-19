@@ -66,6 +66,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 ShuangpinEditorPreview.run()
                 return false
             }
+            if command == "--shuangpin-editor-selftest" {
+                // 键位编辑器入口自检：「编辑键位…」能不能真的把窗口拉到屏前
+                ShuangpinEditorWindowSelfCheck.run()
+                return false
+            }
             if command == "--pinyin-selftest" {
                 // 拼音方案自检：跑一遍「设置 → 引擎 → 候选」的接线断言后退出
                 PinyinSelfCheck.run()

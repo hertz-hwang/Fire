@@ -17,7 +17,6 @@ struct PinyinSchemeSection: View {
     @Default(.pinyinCustomTable) private var customTable
     @Default(.pinyinTypoCorrection) private var typoCorrection
     @State private var fuzzy = PinyinFuzzyRules.none
-    @State private var showEditor = false
 
     /// 当前自定义表（解析失败按小鹤跑，并在面板上说明）
     private var table: ShuangpinKeyTable {
@@ -38,8 +37,10 @@ struct PinyinSchemeSection: View {
         .help("双拼两键一个音节：第一键声母、第二键韵母，零声母另有约定。切分/查词/组句与全拼同一套管线")
 
         if layout.isShuangpin {
+            // 编辑器是独立窗口（键盘图 + 拖拽），不是 sheet：偏好窗口本身是 NSHostingController
+            // 驱动的，`ShuangpinEditorWindow` 关掉时要清掉静态引用，下次进来才是最新的键位表。
             ShuangpinOverview(table: table, editable: layout == .custom) {
-                showEditor = true
+                ShuangpinEditorWindow.open()
             }
         }
 
