@@ -79,8 +79,11 @@ class FireInputController: IMKInputController {
     // 全量可见候选与其消耗键数（学习信号按它取 rank / 被弃首选，顺序与用户所见一致）
     private var _pinyinAll: [Candidate] = []
     private var _pinyinAllConsumed: [Int] = []
-    // 组字区显示串（分段拼音，带 `'`）
+    // 组字区显示串（分段拼音，带 `'`）与它对应的那一帧编码：
+    // `_pinyinMarked` 只能在 `_pinyinMarkedKeys == _originalString` 时用，
+    // 否则画出去的就是上一键的解码（就是用户报的「preedit 慢一个编码」）
     private var _pinyinMarked: String = ""
+    private var _pinyinMarkedKeys: String = ""
 
     /// 高亮驱动候选态（整句与拼音共用一套交互：空格上屏高亮项、Tab/方向键循环、-/= 翻页）
     private var highlightDrivenCandidates: Bool { _sentenceActive || _pinyinActive }
@@ -137,15 +140,22 @@ class FireInputController: IMKInputController {
                 }
             }
             if self.curPage != 1 {
-                // code被重新设置时，还原页码为1
+                // code被重新设置时，还原页码为1（curPage 的 didSet 会刷候选，
+                // 而刷完候选就得重画一次组字区，这里再 mark 就是重复一次 IPC）
                 self.curPage = 1
-                self.markText()
+                if !preeditIsDecoded {
+                    self.markText()
+                }
                 return
             }
             fireLog("[FireInputController] original changed: \(self._originalString), refresh window")
 
-            // 建议mark originalString, 否则在某些APP中会有问题
-            self.markText()
+            // 组字区显示的就是本键的解码结果时（拼音分段读音 / 显示首选项），不在这里 mark
+            // ——那画的是上一键的解码；由 `refreshCandidatesWindow` 在算完后画。
+            if !preeditIsDecoded {
+                // 建议mark originalString, 否则在某些APP中会有问题
+                self.markText()
+            }
 
             self._originalString.count > 0 ? self.refreshCandidatesWindow() : CandidatesWindow.shared.close()
         }
@@ -174,7 +184,37 @@ class FireInputController: IMKInputController {
         self.curPage = self._hasNext ? self.curPage + 1 : self.curPage
     }
 
+    /// 组字区显示的**就是**解码结果：拼音的分段读音、「显示首选项」模式下的候选文字。
+    ///
+    /// 这两种形态下 `_originalString.didSet` 里那次 mark 必然画的是上一键的解码（这一键
+    /// 还没解），用户看到的就是「敲 `nihao` 组字区只有 `ni'ha`，按一下退格又变成 `ni'hao`」
+    /// ——永远慢一个编码。所以这里报 true 时 didSet 不预先 mark，等 `updateCandidates`
+    /// 算完由 `refreshCandidatesWindow` 画一次（反而少一次 setMarkedText）。
+    ///
+    /// 形码整句不在这里：它默认显示的就是原码（只有分段码恰好盖住全部已敲键时才换成
+    /// 分段码），保持「原码即时可见」比省掉一次重画重要。
+    private var preeditIsDecoded: Bool {
+        guard !Defaults[.showCodeInWindow], !_originalString.isEmpty else { return false }
+        return Defaults[.codeInWindowMode] == .firstCandidate || _pinyinActive
+    }
+
+    /// 解码算完后要不要重画一次组字区。整句态也算：它显示的分段码跟着焦点候选走，
+    /// 但那是「先画原码、算完再换成分段码」的第二笔，不是唯一的一笔。
+    private var preeditNeedsRemarkAfterDecode: Bool {
+        guard !Defaults[.showCodeInWindow] else { return false }
+        return preeditIsDecoded || _sentenceActive
+    }
+
+    #if DEBUG
+    /// 最近一次 `markText()` 对应的那一帧编码
+    private var _preeditPaintedFor = ""
+    #endif
+
     private func markText() {
+        #if DEBUG
+        // 记下「这一帧的组字区画过了」，给 `refreshCandidatesWindow` 里的不变量断言用
+        _preeditPaintedFor = _originalString
+        #endif
         let attrs = mark(forStyle: kTSMHiliteConvertedText, at: NSRange(location: NSNotFound, length: 0))
         if let attributes = attrs as? [NSAttributedString.Key: Any] {
             var selected = self._originalString
@@ -214,9 +254,13 @@ class FireInputController: IMKInputController {
     /// 拼音方案的组字区：显示分段后的读音（`ni'hao`）而不是原键。
     /// 双拼下这一步尤其重要——用户敲的是 `nihc`，要看到的是一个拼音词串；
     /// 纠错生效时 `marked` 里已带着被改掉字母的位置（划删除线的信儿）。
+    ///
+    /// 只对「这一帧编码」有效：编码已变而还没重新解码时返回 nil（组字区退回原键），
+    /// 宁可显示用户真敲的键，也不能把上一键的分段读音顶在这一键的编码上。
     private func pinyinPreedit() -> String? {
         guard _pinyinActive, !_originalString.isEmpty else { return nil }
-        return _pinyinMarked.isEmpty ? _originalString : _pinyinMarked
+        guard _pinyinMarkedKeys == _originalString, !_pinyinMarked.isEmpty else { return nil }
+        return _pinyinMarked
     }
 
     // 组词模式下用一个空格占位标记合成串，保持合成态，确保方向键等被输入法消费而不传给应用
@@ -1425,6 +1469,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             _pinyinAllConsumed = []
             _pinyinConsumed = []
             _pinyinMarked = ""
+            _pinyinMarkedKeys = ""
             return false
         }
         guard Defaults[.codeMode] == .pinyin, !_originalString.isEmpty else { return standDown() }
@@ -1442,6 +1487,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             return standDown()
         }
         _pinyinMarked = composing.marked
+        _pinyinMarkedKeys = _originalString
 
         // 用户自定义短语按「解出来的拼音」命中：双拼下用户短语表里的码仍是全拼，
         // 拿敲的键去比对会一条也对不上。命中即置顶并吃掉全部已敲键（短语本来就是整码替换）
@@ -1514,6 +1560,20 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
     // 更新候选窗口
     func refreshCandidatesWindow() {
         updateCandidates(client())
+        // 组字区显示的是解码结果（拼音分段读音 / 整句分段码 / 「显示首选项」的候选文字）时，
+        // 必须紧跟 `updateCandidates` 重画：`_pinyinMarked`、`_candidates` 都是它刚算出来的。
+        // 放在自动上屏/关窗那几条早退**之前**：早退也不能让组字区停在上一键的解码上。
+        if preeditNeedsRemarkAfterDecode {
+            markText()
+        }
+        #if DEBUG
+        // 组字区显示的就是本键的解码结果时，解码之后必须真的画过一次这一帧。
+        // 谁把这次 mark 挪到早退分支之后、或把 `preeditIsDecoded` 的分支删掉，这里就红：
+        // 那就是「preedit 比实际按键慢一个编码」的复发。
+        assert(_originalString.isEmpty || !preeditIsDecoded
+               || _preeditPaintedFor == _originalString,
+               "解码后没重画组字区：组字区会停在上一帧的解码上")
+        #endif
         if shouldAutoCommitCandidate() {
             return
         }
@@ -1534,13 +1594,6 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             caretRect: getCaretRect(),
             highlightIndex: _sentenceActive ? _sentenceHighlightIndex : 0
         )
-        // 候选词更新后重新 mark，确保组字区跟随焦点候选：
-        // 「显示首选项」模式下显示焦点候选文字；整句态刷新分段码空格分组。
-        // 非整句且非首选项模式时组字区不随候选变化，省一次 setMarkedText IPC。
-        if !Defaults[.showCodeInWindow],
-           Defaults[.codeInWindowMode] == .firstCandidate || _sentenceActive {
-            markText()
-        }
     }
 
     override func selectionRange() -> NSRange {
@@ -1557,9 +1610,10 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             if let selected = selected {
                 return NSRange(location: 0, length: selected.text.count)
             }
-        } else if let segmented = sentenceSegmentedPreedit() {
-            // 分段码比原码多出字间空格，selection 需覆盖完整分段串
-            return NSRange(location: 0, length: segmented.count)
+        } else if let marked = pinyinPreedit() ?? sentenceSegmentedPreedit() {
+            // 分段码/分段读音比原码多出的 `'` 与空格也在合成串里：selection 要覆盖
+            // 完整显示串，否则应用按原码长度画插入点，合成区尾部看着像没选中
+            return NSRange(location: 0, length: marked.count)
         }
         return NSRange(location: 0, length: _originalString.count)
     }
@@ -1854,6 +1908,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         _pinyinAll = []
         _pinyinAllConsumed = []
         _pinyinMarked = ""
+        _pinyinMarkedKeys = ""
         _sentenceHighlightIndex = 0
         _sentenceTotalCount = 0
         _pageCount = 0
