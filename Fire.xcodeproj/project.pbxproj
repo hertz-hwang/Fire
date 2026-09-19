@@ -63,6 +63,21 @@
 		67F0B0D32AFFC282006F835D /* StatusBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67F0B0D22AFFC282006F835D /* StatusBarController.swift */; };
 		910DF3B32F6273D000EDA24D /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 67C9A05A2AB5445E000B5281 /* Security.framework */; };
 		AA5E0001000000000SENT001 /* NgramModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0001000000000SENT101 /* NgramModel.swift */; };
+		AA5E000B0000000000PYO001 /* ShuangpinKeyEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000B0000000000PYN001 /* ShuangpinKeyEditor.swift */; };
+		AA5E000B0000000000PYM001 /* PinyinSelfCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000B0000000000PYL001 /* PinyinSelfCheck.swift */; };
+		AA5E000B0000000000PYK001 /* PinyinSchemeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000B0000000000PYJ001 /* PinyinSchemeView.swift */; };
+		AA5E000B0000000000PYK002 /* ShuangpinEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000B0000000000PYJ002 /* ShuangpinEditorView.swift */; };
+		AA5E000B0000000000PYB001 /* PinyinSyllables.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000B0000000000PYF001 /* PinyinSyllables.swift */; };
+		AA5E000B0000000000PYB002 /* PinyinSegmentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000B0000000000PYF002 /* PinyinSegmentation.swift */; };
+		AA5E000B0000000000PYB003 /* PinyinFuzzy.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000B0000000000PYF003 /* PinyinFuzzy.swift */; };
+		AA5E000B0000000000PYB004 /* PinyinCorrection.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000B0000000000PYF004 /* PinyinCorrection.swift */; };
+		AA5E000B0000000000PYB005 /* ShuangpinTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000B0000000000PYF005 /* ShuangpinTable.swift */; };
+		AA5E000B0000000000PYB006 /* ShuangpinScheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000B0000000000PYF006 /* ShuangpinScheme.swift */; };
+		AA5E000B0000000000PYB007 /* PinyinLexicon.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000B0000000000PYF007 /* PinyinLexicon.swift */; };
+		AA5E000B0000000000PYB008 /* PinyinDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000B0000000000PYF008 /* PinyinDecoder.swift */; };
+		AA5E000B0000000000PYB009 /* PinyinEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000B0000000000PYF009 /* PinyinEngine.swift */; };
+		AA5E000B0000000000PYB010 /* PinyinComposing.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000B0000000000PYF010 /* PinyinComposing.swift */; };
+		AA5E000B0000000000PYI001 /* PinyinSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E000B0000000000PYH001 /* PinyinSettings.swift */; };
 		AA5E0002000000000SENT002 /* SentenceLexicon.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0002000000000SENT102 /* SentenceLexicon.swift */; };
 		AA5E0003000000000SENT003 /* SentenceDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0003000000000SENT103 /* SentenceDecoder.swift */; };
 		AA5E0004000000000SENT004 /* SentenceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5E0004000000000SENT104 /* SentenceEngine.swift */; };
@@ -154,6 +169,21 @@
 		67C9A0572AB5429B000B5281 /* sqlite3.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = sqlite3.h; sourceTree = "<group>"; };
 		67C9A05A2AB5445E000B5281 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		67F0B0D22AFFC282006F835D /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
+		AA5E000B0000000000PYF001 /* PinyinSyllables.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PinyinSyllables.swift; sourceTree = "<group>"; };
+		AA5E000B0000000000PYF002 /* PinyinSegmentation.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PinyinSegmentation.swift; sourceTree = "<group>"; };
+		AA5E000B0000000000PYF003 /* PinyinFuzzy.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PinyinFuzzy.swift; sourceTree = "<group>"; };
+		AA5E000B0000000000PYF004 /* PinyinCorrection.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PinyinCorrection.swift; sourceTree = "<group>"; };
+		AA5E000B0000000000PYF005 /* ShuangpinTable.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ShuangpinTable.swift; sourceTree = "<group>"; };
+		AA5E000B0000000000PYF006 /* ShuangpinScheme.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ShuangpinScheme.swift; sourceTree = "<group>"; };
+		AA5E000B0000000000PYF007 /* PinyinLexicon.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PinyinLexicon.swift; sourceTree = "<group>"; };
+		AA5E000B0000000000PYF008 /* PinyinDecoder.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PinyinDecoder.swift; sourceTree = "<group>"; };
+		AA5E000B0000000000PYF009 /* PinyinEngine.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PinyinEngine.swift; sourceTree = "<group>"; };
+		AA5E000B0000000000PYF010 /* PinyinComposing.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PinyinComposing.swift; sourceTree = "<group>"; };
+		AA5E000B0000000000PYH001 /* PinyinSettings.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PinyinSettings.swift; sourceTree = "<group>"; };
+		AA5E000B0000000000PYJ001 /* PinyinSchemeView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PinyinSchemeView.swift; sourceTree = "<group>"; };
+		AA5E000B0000000000PYJ002 /* ShuangpinEditorView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ShuangpinEditorView.swift; sourceTree = "<group>"; };
+		AA5E000B0000000000PYL001 /* PinyinSelfCheck.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PinyinSelfCheck.swift; sourceTree = "<group>"; };
+		AA5E000B0000000000PYN001 /* ShuangpinKeyEditor.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ShuangpinKeyEditor.swift; sourceTree = "<group>"; };
 		AA5E0001000000000SENT101 /* NgramModel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NgramModel.swift; sourceTree = "<group>"; };
 		AA5E0002000000000SENT102 /* SentenceLexicon.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceLexicon.swift; sourceTree = "<group>"; };
 		AA5E0003000000000SENT103 /* SentenceDecoder.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SentenceDecoder.swift; sourceTree = "<group>"; };
@@ -276,8 +306,11 @@
 				67F0B0D22AFFC282006F835D /* StatusBarController.swift */,
 				67C9A0042AB53E83000B5281 /* StatusBar.swift */,
 				67C9A0082AB53E83000B5281 /* types.swift */,
+				AA5E000B0000000000PYL001 /* PinyinSelfCheck.swift */,
+				AA5E000B0000000000PYH001 /* PinyinSettings.swift */,
 				67C9A0032AB53E83000B5281 /* Utils.swift */,
 				AA5E0007000000000SENTG07 /* Sentence */,
+				AA5E000B0000000000PYG099 /* Pinyin */,
 				AA5E0007000000000LRNG07 /* Learning */,
 				67C99FF82AB53E62000B5281 /* Utils */,
 				67C99FEB2AB53DB2000B5281 /* AppDelegate.swift */,
@@ -343,6 +376,8 @@
 				AA7E0001000000000PRF101 /* NativePreferencesView.swift */,
 				AA7E0002000000000PRF102 /* PreferencePickerRow.swift */,
 				AA7E0003000000000PRF103 /* ThemeEditorView.swift */,
+				AA5E000B0000000000PYJ001 /* PinyinSchemeView.swift */,
+				AA5E000B0000000000PYJ002 /* ShuangpinEditorView.swift */,
 				67C9A0252AB53ED3000B5281 /* StatisticsPane.swift */,
 				AABB0001STATF0001 /* StatsViewComponents.swift */,
 				67C9A0262AB53ED3000B5281 /* FirePreferencesController.swift */,
@@ -396,6 +431,24 @@
 				AA5E0009000000000SENT109 /* SentenceDiff.swift */,
 			);
 			path = Sentence;
+			sourceTree = "<group>";
+		};
+		AA5E000B0000000000PYG099 /* Pinyin */ = {
+			isa = PBXGroup;
+			children = (
+				AA5E000B0000000000PYF001 /* PinyinSyllables.swift */,
+				AA5E000B0000000000PYF002 /* PinyinSegmentation.swift */,
+				AA5E000B0000000000PYF003 /* PinyinFuzzy.swift */,
+				AA5E000B0000000000PYF004 /* PinyinCorrection.swift */,
+				AA5E000B0000000000PYF005 /* ShuangpinTable.swift */,
+				AA5E000B0000000000PYF006 /* ShuangpinScheme.swift */,
+				AA5E000B0000000000PYF007 /* PinyinLexicon.swift */,
+				AA5E000B0000000000PYF008 /* PinyinDecoder.swift */,
+				AA5E000B0000000000PYF009 /* PinyinEngine.swift */,
+				AA5E000B0000000000PYF010 /* PinyinComposing.swift */,
+				AA5E000B0000000000PYN001 /* ShuangpinKeyEditor.swift */,
+			);
+			path = Pinyin;
 			sourceTree = "<group>";
 		};
 		AA5E0007000000000LRNG07 /* Learning */ = {
@@ -537,6 +590,21 @@
 				67C9A03A2AB53ED3000B5281 /* FireInputServer.swift in Sources */,
 				67C9A00F2AB53E83000B5281 /* FireInputController.swift in Sources */,
 				AA5E0001000000000SENT001 /* NgramModel.swift in Sources */,
+				AA5E000B0000000000PYO001 /* ShuangpinKeyEditor.swift in Sources */,
+				AA5E000B0000000000PYM001 /* PinyinSelfCheck.swift in Sources */,
+				AA5E000B0000000000PYK001 /* PinyinSchemeView.swift in Sources */,
+				AA5E000B0000000000PYK002 /* ShuangpinEditorView.swift in Sources */,
+				AA5E000B0000000000PYB001 /* PinyinSyllables.swift in Sources */,
+				AA5E000B0000000000PYB002 /* PinyinSegmentation.swift in Sources */,
+				AA5E000B0000000000PYB003 /* PinyinFuzzy.swift in Sources */,
+				AA5E000B0000000000PYB004 /* PinyinCorrection.swift in Sources */,
+				AA5E000B0000000000PYB005 /* ShuangpinTable.swift in Sources */,
+				AA5E000B0000000000PYB006 /* ShuangpinScheme.swift in Sources */,
+				AA5E000B0000000000PYB007 /* PinyinLexicon.swift in Sources */,
+				AA5E000B0000000000PYB008 /* PinyinDecoder.swift in Sources */,
+				AA5E000B0000000000PYB009 /* PinyinEngine.swift in Sources */,
+				AA5E000B0000000000PYB010 /* PinyinComposing.swift in Sources */,
+				AA5E000B0000000000PYI001 /* PinyinSettings.swift in Sources */,
 				AA5E0002000000000SENT002 /* SentenceLexicon.swift in Sources */,
 				AA5E0003000000000SENT003 /* SentenceDecoder.swift in Sources */,
 				AA5E0004000000000SENT004 /* SentenceEngine.swift in Sources */,

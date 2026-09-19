@@ -157,6 +157,10 @@ struct GeneralPane: View {
                         enforcePinyinDefaults()
                     }
                 }
+                // 拼音方案专属：输入方式（全拼 / 双拼）、模糊音、敲错纠正
+                if code == .pinyin {
+                    PinyinSchemeSection()
+                }
                 // 仅码表方案提供内置码表选择（选项来自 Resources/schemas）
                 if code == .wubi {
                     PreferencePickerRow(title: "码表") {

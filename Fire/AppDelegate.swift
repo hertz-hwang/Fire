@@ -61,6 +61,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // 整句解码探针：打印候选的各维度打分拆解（显示打分验证/调参归因）
                 exit(SentenceDecodeProbe.run(codes: Array(CommandLine.arguments.dropFirst(2))))
             }
+            if command == "--pinyin-selftest" {
+                // 拼音方案自检：跑一遍「设置 → 引擎 → 候选」的接线断言后退出
+                PinyinSelfCheck.run()
+                return false
+            }
             if command == "--learning-selftest" {
                 // 学习数据 TCSKNM02 导入导出自检（合成计数往返 + 真实读取器交叉验证）
                 exit(LearningSelfTest.run())
@@ -175,6 +180,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // 拼音方案锁定项归一（覆盖老版本升级残留的自由配置）
         enforcePinyinInputModeDefaults()
+        // 拼音方案在用：就把音节索引先载好（约 180ms），别让第一次敲字付这笔钱
+        if Defaults[.codeMode] == .pinyin {
+            PinyinEngineCenter.shared.prepareIfNeeded()
+        }
         // 老版本平铺在 Resources 根的码表路径迁移到 Resources/schemas
         SchemaCatalog.migrateLegacyTablePaths()
         // 内置默认主题升级

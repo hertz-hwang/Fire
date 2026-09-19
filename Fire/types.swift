@@ -140,6 +140,14 @@ extension Defaults.Keys {
         default: .semicolonQuote
     )
     static let codeMode = Key<CodeMode>("codeMode", default: CodeMode.wubiPinyin)
+    // 拼音输入方式（编码方案=拼音时生效）：全拼 / 小鹤双拼 / 自然码双拼 / 自定义双拼
+    static let pinyinLayout = Key<PinyinLayout>("pinyinLayout", default: PinyinLayout.fullPinyin)
+    // 自定义双拼键位表（ShuangpinKeyTable 的 JSON）；空 = 未编辑过（按小鹤起步）
+    static let pinyinCustomTable = Key<String>("pinyinCustomTable", default: "")
+    // 拼音模糊音（PinyinFuzzyRules 的 JSON）；空 = 全关
+    static let pinyinFuzzyRules = Key<String>("pinyinFuzzyRules", default: "")
+    // 拼音敲错纠正：音节级换位/相邻换键进词图 + 整段一处编辑的纠错
+    static let pinyinTypoCorrection = Key<Bool>("pinyinTypoCorrection", default: true)
     static let jianQuanMode = Key<JianQuanMode>("jianQuanMode", default: JianQuanMode.normal)
 
     // 中英文切换配置
@@ -290,6 +298,56 @@ enum CodeMode: Int, CaseIterable, Decodable, Encodable, Defaults.Serializable {
     case wubi
     case pinyin
     case wubiPinyin
+}
+
+/// 拼音输入方式：全拼，或某种双拼（两键一音节）。
+/// 双拼只改「键 → 音节」的映射，切分 / 查词 / 组句 / 排序全部复用全拼那套管线的
+/// （参考实现 `shuangpin/mod.rs` 的原话：壳与词库都不知道双拼的存在），
+/// 所以新增一种方案 = 加一张键位表，不是加一条管线。
+enum PinyinLayout: Int, CaseIterable, Decodable, Encodable, Defaults.Serializable {
+    case fullPinyin   // 全拼
+    case xiaohe       // 小鹤双拼
+    case ziranma      // 自然码双拼
+    case custom       // 自定义双拼（键位表见 pinyinCustomTable）
+
+    var label: String {
+        switch self {
+        case .fullPinyin: return "全拼"
+        case .xiaohe: return "小鹤双拼"
+        case .ziranma: return "自然码双拼"
+        case .custom: return "自定义双拼"
+        }
+    }
+
+    /// 是否双拼（组字区显示、上屏消耗都要按「音节对应几个键」换算）
+    var isShuangpin: Bool { self != .fullPinyin }
+
+    /// 该方式用的键位表；全拼为 nil。
+    /// 自定义表 JSON 坏了不能让整个拼音方案打不出字：回落小鹤。
+    var keyTable: ShuangpinKeyTable? {
+        switch self {
+        case .fullPinyin: return nil
+        case .xiaohe: return ShuangpinTables.xiaohe
+        case .ziranma: return ShuangpinTables.ziranma
+        case .custom: return PinyinLayout.customKeyTable(from: Defaults[.pinyinCustomTable])
+        }
+    }
+
+    /// 解析自定义键位表 JSON；失败回落小鹤（并在面板上提示）
+    static func customKeyTable(from json: String) -> ShuangpinKeyTable {
+        guard !json.isEmpty, let data = json.data(using: .utf8),
+              let table = try? JSONDecoder().decode(ShuangpinKeyTable.self, from: data) else {
+            return ShuangpinTables.xiaohe
+        }
+        return table
+    }
+
+    /// 自定义表当前是否有效（面板用来决定要不要显示「键位表读取失败」提示）
+    static var customTableIsValid: Bool {
+        let json = Defaults[.pinyinCustomTable]
+        guard !json.isEmpty, let data = json.data(using: .utf8) else { return false }
+        return (try? JSONDecoder().decode(ShuangpinKeyTable.self, from: data)) != nil
+    }
 }
 
 /// 拼音方案的锁定默认项：整句强制开、自动上屏强制关（统一空格上屏）、

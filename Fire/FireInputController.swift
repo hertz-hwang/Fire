@@ -70,6 +70,20 @@ class FireInputController: IMKInputController {
     private var _sentenceHighlightIndex: Int = 0
     // 整句解码总候选数（分页用；_candidates 只装当前页）
     private var _sentenceTotalCount = 0
+    // 拼音方案分支激活：候选与上屏消耗全部归 PinyinEngine（与整句分支互斥）
+    private var _pinyinActive: Bool = false
+    // 与 `_candidates` 一一对齐：这条候选上屏要吃掉几个已敲键。
+    // 拼音不能按「全部清空」结算：双拼一键一音节、简拼一音节一键，
+    // 选一个前缀词时剩下的键要留在组字区继续组句
+    private var _pinyinConsumed: [Int] = []
+    // 全量可见候选与其消耗键数（学习信号按它取 rank / 被弃首选，顺序与用户所见一致）
+    private var _pinyinAll: [Candidate] = []
+    private var _pinyinAllConsumed: [Int] = []
+    // 组字区显示串（分段拼音，带 `'`）
+    private var _pinyinMarked: String = ""
+
+    /// 高亮驱动候选态（整句与拼音共用一套交互：空格上屏高亮项、Tab/方向键循环、-/= 翻页）
+    private var highlightDrivenCandidates: Bool { _sentenceActive || _pinyinActive }
     // 候选总页数（页码指示 "n/m" 用；0/1 表示单页不显示）
     private var _pageCount = 0
     internal var inputMode: InputMode {
@@ -118,7 +132,7 @@ class FireInputController: IMKInputController {
             if oldValue != _originalString {
                 // 编码变化即重置整句高亮位与页码
                 _sentenceHighlightIndex = 0
-                if _sentenceActive {
+                if highlightDrivenCandidates {
                     curPage = 1
                 }
             }
@@ -168,7 +182,7 @@ class FireInputController: IMKInputController {
                 selected = self._originalString.count > 0 ? " " : ""
             } else if Defaults[.codeInWindowMode] == .firstCandidate && !self._originalString.isEmpty {
                 selected = sentenceFocusedCandidate()?.text ?? _candidates.first?.text ?? self._originalString
-            } else if let segmented = sentenceSegmentedPreedit() {
+            } else if let segmented = pinyinPreedit() ?? sentenceSegmentedPreedit() {
                 selected = segmented
             }
             let text = NSAttributedString(string: selected, attributes: attributes)
@@ -178,7 +192,7 @@ class FireInputController: IMKInputController {
 
     /// 整句焦点候选（高亮项），非整句态返回 nil
     private func sentenceFocusedCandidate() -> Candidate? {
-        guard _sentenceActive, _sentenceHighlightIndex < _candidates.count else { return nil }
+        guard highlightDrivenCandidates, _sentenceHighlightIndex < _candidates.count else { return nil }
         return _candidates[_sentenceHighlightIndex]
     }
 
@@ -195,6 +209,14 @@ class FireInputController: IMKInputController {
         guard code != _originalString,
               code.filter({ $0 != " " }) == _originalString.filter({ $0 != " " }) else { return nil }
         return code
+    }
+
+    /// 拼音方案的组字区：显示分段后的读音（`ni'hao`）而不是原键。
+    /// 双拼下这一步尤其重要——用户敲的是 `nihc`，要看到的是一个拼音词串；
+    /// 纠错生效时 `marked` 里已带着被改掉字母的位置（划删除线的信儿）。
+    private func pinyinPreedit() -> String? {
+        guard _pinyinActive, !_originalString.isEmpty else { return nil }
+        return _pinyinMarked.isEmpty ? _originalString : _pinyinMarked
     }
 
     // 组词模式下用一个空格占位标记合成串，保持合成态，确保方向键等被输入法消费而不传给应用
@@ -718,7 +740,7 @@ class FireInputController: IMKInputController {
                 (keyCode == kVK_DownArrow && Defaults[.candidatesDirection] == .horizontal) ||
                 (keyCode == kVK_RightArrow && Defaults[.candidatesDirection] == .vertical)
             if needNextPage {
-                if _sentenceActive {
+                if highlightDrivenCandidates {
                     if keyCode == kVK_ANSI_Equal {
                         sentencePage(step: 1)
                     } else {
@@ -734,7 +756,7 @@ class FireInputController: IMKInputController {
                 (keyCode == kVK_UpArrow && Defaults[.candidatesDirection] == .horizontal) ||
                 (keyCode == kVK_LeftArrow && Defaults[.candidatesDirection] == .vertical)
             if needPrevPage {
-                if _sentenceActive {
+                if highlightDrivenCandidates {
                     if keyCode == kVK_ANSI_Minus {
                         sentencePage(step: -1)
                     } else {
@@ -751,7 +773,9 @@ class FireInputController: IMKInputController {
 
     /// 整句候选高亮循环（Tab/Shift+Tab、方向键共用），页内回绕
     private func cycleSentenceHighlight(step: Int) {
-        SentenceEngine.shared.suspendAutoCommit(_sentenceSession)
+        if _sentenceActive {
+            SentenceEngine.shared.suspendAutoCommit(_sentenceSession)
+        }
         guard _candidates.count > 0 else { return }
         _sentenceHighlightIndex = (_sentenceHighlightIndex + step + _candidates.count) % _candidates.count
         refreshCandidatesWindow()
@@ -761,9 +785,12 @@ class FireInputController: IMKInputController {
     /// -/= 只翻页：已在边缘页时不做任何事（页内循环归 Tab/方向键管）。
     /// curPage 的 didSet 会触发 refreshCandidatesWindow，句柄分支按页重组候选。
     private func sentencePage(step: Int) {
-        SentenceEngine.shared.suspendAutoCommit(_sentenceSession)
+        if _sentenceActive {
+            SentenceEngine.shared.suspendAutoCommit(_sentenceSession)
+        }
         let pageSize = max(1, Defaults[.candidateCount])
-        let pageCount = max(1, (_sentenceTotalCount + pageSize - 1) / pageSize)
+        let total = _pinyinActive ? _pinyinAll.count : _sentenceTotalCount
+        let pageCount = max(1, (total + pageSize - 1) / pageSize)
         let target = curPage + step
         guard target >= 1, target <= pageCount, target != curPage else { return }
         _sentenceHighlightIndex = 0
@@ -775,8 +802,8 @@ class FireInputController: IMKInputController {
         if event.keyCode == kVK_Delete {
             if _originalString.count > 0 {
                 _originalString = String(_originalString.dropLast())
-                // 整句：删键后证据作废（会话保留，继续敲可重新积累）
-                if _sentenceActive || Defaults[.enableSentenceMode] {
+                // 整句：删键后证据作废（会话保留，继续敲可重新积累）；拼音不走那套证据
+                if _sentenceActive || (Defaults[.enableSentenceMode] && Defaults[.codeMode] != .pinyin) {
                     SentenceEngine.shared.evidenceInvalidated(_sentenceSession)
                 }
                 return true
@@ -812,6 +839,12 @@ class FireInputController: IMKInputController {
         if match != nil {
             // 整句：组字区编码超过上限不再吸收新键（把键交回系统）
             if _sentenceActive && _originalString.count >= SentenceConfig.maxRawLength {
+                return nil
+            }
+            // 拼音：同样设长度上限。引擎每键从头重解，开销随音节数涨，
+            // 不封顶时长串能把主线程拖住（上限 40 键 ≈ 20 个音节，比参考实现的
+            // 纠错上界宽一倍，正常句子远碰不到）
+            if _pinyinActive && _originalString.count >= PinyinEngine.maxRawKeys {
                 return nil
             }
             // 常规码表（非整句）：已达最大码长且候选为空时，下一码丢弃旧串，
@@ -853,6 +886,15 @@ class FireInputController: IMKInputController {
                     return true
                 }
             }
+            return true
+        }
+        // 拼音：`'` 是分词符（`xi'an` 不让它读成「先」），微软/搜狗类方案的 `;` 是 `ing` 键位，
+        // 两者都要进缓冲区；其余标点交回 punctuationKeyHandler 出中文标点。
+        if _pinyinActive, string == "'" || (string == ";" && PinyinEngineCenter.shared.engine.usesSemicolon) {
+            if _originalString.count >= PinyinEngine.maxRawKeys {
+                return nil
+            }
+            _originalString += string
             return true
         }
         // 整句激活时 ;/' 是选重符（虎整句 alphabet），吸收进编码固定用字但不上屏；
@@ -920,7 +962,7 @@ class FireInputController: IMKInputController {
             if _originalString.count > 0 {
                 // 整句激活时数字照常选候选（虎整句"数字当选重符"的语义已取消）；
                 // 越界数字吞掉，避免数字混进编码被 parse_selector 当选重符解析
-                if _sentenceActive {
+                if highlightDrivenCandidates {
                     let index = pos - 1
                     if index >= 0 && index < _candidates.count {
                         insertCandidate(_candidates[index])
@@ -948,9 +990,8 @@ class FireInputController: IMKInputController {
     private func candidateSelectKeyHandler(event: NSEvent) -> Bool? {
         guard inputMode == .zhhans else { return nil }
         guard _originalString.count > 0 else { return nil }
-        // 整句激活时 ;/' 不选词，放行给 punctuationKeyHandler 出标点
-        // （虎整句的选重符语义在 Fire 里用 Tab 循环定位替代）
-        if _sentenceActive { return nil }
+        // 整句/拼音激活时 ;/' 不选词（拼音的 `'` 是分词符、`;` 在部分双拼方案里是键位）
+        if highlightDrivenCandidates { return nil }
         guard Defaults[.enablePunctuationCandidateSelect] else { return nil }
         // 标点顶屏时，shift+标点键应触发顶屏而非候选选择
         if Defaults[.enablePunctuationTopScreen] && event.modifierFlags.contains(.shift) { return nil }
@@ -1043,7 +1084,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             return nil
         }
         // 整句激活时额外选择键不选词（虎整句用 Tab 循环定位）
-        if _sentenceActive { return nil }
+        if highlightDrivenCandidates { return nil }
 
         let mode = Defaults[.extraCandidateSelectKeys]
         guard mode != .disabled else { return nil }
@@ -1236,6 +1277,13 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             }
         }
 
+        // 拼音方案分支：候选与编码消费全部归拼音引擎（切分 / 简拼 / 模糊音 / 纠错 / 双拼）。
+        // 位置在整句分支之前：拼音的「整句」就是引擎的首条 Sentence 候选，
+        // 不再走虎整句边表；引擎未就绪（首次载入索引的百多毫秒）时回落到普通词库分支。
+        if Defaults[.codeMode] == .pinyin, updatePinyinCandidates() {
+            return
+        }
+
         // 整句分支：可用时候选栏全部来自整句引擎（z键重复上屏等特例除外）
         if Defaults[.enableSentenceMode] {
             SentenceEngine.shared.prepareIfNeeded()
@@ -1352,6 +1400,13 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
     /// 页码指示的总页数：单页菜单不查总数（最常见路径零开销）；
     /// 多页时才查一次候选总数。总数因过滤可能略偏小时以当前页码兜底，
     /// 保证指示器不会出现 "n > m"。
+    /// 候选在全量可见列表里的序号（拼音）：页内候选与全量列表按 text+code 对齐，
+    /// 同名不同码（同一个词的不同读音）不能互相顶名。
+    private func visiblePinyinIndex(of candidate: Candidate) -> Int? {
+        _pinyinAll.firstIndex { $0.text == candidate.text && $0.code == candidate.code }
+            ?? _pinyinAll.firstIndex { $0.text == candidate.text }
+    }
+
     private func resolvePageCount(hasNext: Bool, totalProvider: () -> Int) -> Int {
         if !hasNext && curPage <= 1 { return 1 }
         let pageSize = max(1, Defaults[.candidateCount])
@@ -1360,21 +1415,93 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         return max(curPage, (total + pageSize - 1) / pageSize)
     }
 
-    /// 整句候选分支是否可用：开关 + 引擎可用 + 不落入各特例早退分支
+    /// 拼音候选分支：查询引擎、并入用户自定义短语、按页切候选。
+    /// 返回 false = 本分支不接手（索引未就绪 / 这串键解不出东西），
+    /// 调用方继续走常规码表——宁可不智能，不能打不出字。
+    private func updatePinyinCandidates() -> Bool {
+        func standDown() -> Bool {
+            _pinyinActive = false
+            _pinyinAll = []
+            _pinyinAllConsumed = []
+            _pinyinConsumed = []
+            _pinyinMarked = ""
+            return false
+        }
+        guard Defaults[.codeMode] == .pinyin, !_originalString.isEmpty else { return standDown() }
+        guard !isTempEnModeActive(), _originalString.first != "`" else { return standDown() }
+        let center = PinyinEngineCenter.shared
+        center.prepareIfNeeded()
+        guard center.ready else { return standDown() }
+
+        let context = Defaults[.enableSentenceMode] ? _sentenceSession.contextText : ""
+        guard let composing = center.engine.compose(_originalString, leftContext: context),
+              !composing.candidates.isEmpty else {
+            return standDown()
+        }
+        _pinyinMarked = composing.marked
+
+        // 用户自定义短语按「解出来的拼音」命中：双拼下用户短语表里的码仍是全拼，
+        // 拿敲的键去比对会一条也对不上。命中即置顶并吃掉全部已敲键（短语本来就是整码替换）
+        let phraseScope = composing.decoded.map { $0.pinyin } ?? _originalString
+        let userMatches = phraseScope.isEmpty ? [] : DictManager.shared.getUserCandidates(matching: phraseScope)
+        var userTexts = Set<String>()
+        for user in userMatches { userTexts.insert(user.text) }
+
+        var all: [Candidate] = []
+        var consumed: [Int] = []
+        if !userMatches.isEmpty {
+            for user in userMatches {
+                all.append(user)
+                consumed.append(_originalString.count)
+            }
+        }
+        for item in composing.candidates where !userTexts.contains(item.text) {
+            all.append(Candidate(code: item.code.isEmpty ? _originalString : item.code,
+                                 text: item.text,
+                                 type: item.isSentence ? .sentence : .py))
+            consumed.append(max(1, min(item.consumedKeys, _originalString.count)))
+        }
+        guard !all.isEmpty else { return standDown() }
+
+        _pinyinAll = all
+        _pinyinAllConsumed = consumed
+        let pageSize = max(1, Defaults[.candidateCount])
+        let pageCount = max(1, (all.count + pageSize - 1) / pageSize)
+        if curPage > pageCount { curPage = pageCount }
+        let start = (curPage - 1) * pageSize
+        let end = min(start + pageSize, all.count)
+        _candidates = Array(all[start ..< end])
+        _pinyinConsumed = Array(consumed[start ..< end])
+        _hasNext = curPage < pageCount
+        _pageCount = pageCount
+        if _sentenceHighlightIndex >= _candidates.count {
+            _sentenceHighlightIndex = max(0, _candidates.count - 1)
+        }
+        _pinyinActive = true
+        _sentenceActive = false
+        return true
+    }
+
+    /// 整句候选分支是否可用：开关 + 引擎可用 + 不落入各特例早退分支。
+    /// 拼音方案不走这里：它的整句由 `PinyinEngine` 自己出（候选栏里第 1 条），
+    /// 把拼音键送进虎整句边表只会整句全打不中。
     private func sentenceBranchAllowed() -> Bool {
         guard Defaults[.enableSentenceMode] else { return false }
+        guard Defaults[.codeMode] != .pinyin else { return false }
         guard _originalString.first != "`" else { return false }
         guard !isTempEnModeActive() else { return false }
         if Defaults[.zKeyRepeat] && _originalString == "z" { return false }
         return SentenceEngine.shared.available
     }
 
-    /// Tab / Shift+Tab 循环定位整句候选
+    /// Tab / Shift+Tab 循环定位整句 / 拼音候选
     private func tabKeyHandler(event: NSEvent) -> Bool? {
         guard event.keyCode == kVK_Tab, inputMode == .zhhans else { return nil }
-        guard _sentenceActive, _candidates.count > 1 else { return nil }
-        // 与虎整句一致：手动选候选时挂起自动上屏
-        SentenceEngine.shared.suspendAutoCommit(_sentenceSession)
+        guard highlightDrivenCandidates, _candidates.count > 1 else { return nil }
+        // 与虎整句一致：手动选候选时挂起自动上屏（拼音本来就没有自动上屏）
+        if _sentenceActive {
+            SentenceEngine.shared.suspendAutoCommit(_sentenceSession)
+        }
         let step = event.modifierFlags.contains(.shift) ? -1 : 1
         _sentenceHighlightIndex = (_sentenceHighlightIndex + step + _candidates.count) % _candidates.count
         refreshCandidatesWindow()
@@ -1443,7 +1570,18 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
     /// 顶屏/定时等自动上屏没有提交键，由调用方传入实际消耗的编码键数。
     func insertCandidate(_ candidate: Candidate, committedKeys: Int? = nil) {
         // insertText 内部 clean() 会清空 _originalString，键数必须先取
-        let keys = max(1, committedKeys ?? (_originalString.count + 1))
+        // 拼音：调用方没给键数时按这条候选实际覆盖的键数算（前缀词只吃自己那一段），
+        // 剩下的键上屏后回到组字区继续组句
+        var pinyinRemaining = ""
+        var effectiveKeys = committedKeys
+        let wasPinyin = _pinyinActive
+        if _pinyinActive, committedKeys == nil,
+           let index = visiblePinyinIndex(of: candidate) {
+            let keys = _pinyinAllConsumed[index]
+            effectiveKeys = keys
+            pinyinRemaining = String(_originalString.dropFirst(min(keys, _originalString.count)))
+        }
+        let keys = max(1, effectiveKeys ?? (_originalString.count + 1))
         // 学习信号（clean() 会重置会话与 _sentenceActive，全部先捕获）：
         // rawCode = 本次上屏的原始编码；ctx = 上屏前的会话上下文末 2 字；
         // rank = 可见候选列表中的命中序号（0 = 首选）；top1Text = 被放弃的首选
@@ -1451,7 +1589,12 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         let ctxText = _sentenceSession.contextText
         var rank = 0
         var top1Text = ""
-        if _sentenceActive, !_sentenceAllCandidates.isEmpty {
+        if _pinyinActive, !_pinyinAll.isEmpty {
+            top1Text = _pinyinAll[0].text
+            if let index = visiblePinyinIndex(of: candidate) {
+                rank = index
+            }
+        } else if _sentenceActive, !_sentenceAllCandidates.isEmpty {
             top1Text = _sentenceAllCandidates[0].text
             if let index = _sentenceAllCandidates.firstIndex(where: { $0.text == candidate.text }) {
                 rank = index
@@ -1481,6 +1624,10 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             _sentenceSession.recordContext(candidate.text)
         }
         insertText(candidate.text)
+        // 拼音选了前缀词：把没消耗完的键送回组字区（set 会重画组字区并重查候选）
+        if wasPinyin, !pinyinRemaining.isEmpty {
+            _originalString = pinyinRemaining
+        }
         let appBundleId = client()?.bundleIdentifier() ?? ""
         let notification = Notification(
             name: Fire.candidateInserted,
@@ -1697,6 +1844,11 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         _pendingDeleteCandidate = nil
         _combineCount = nil
         _sentenceActive = false
+        _pinyinActive = false
+        _pinyinConsumed = []
+        _pinyinAll = []
+        _pinyinAllConsumed = []
+        _pinyinMarked = ""
         _sentenceHighlightIndex = 0
         _sentenceTotalCount = 0
         _pageCount = 0

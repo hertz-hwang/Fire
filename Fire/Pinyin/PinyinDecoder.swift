@@ -130,7 +130,17 @@ final class PinyinDecoder {
         }
     }
 
-    func clearCache() { spanCache.removeAll() }
+    /// 换码表 / 换模型 / 学习数据换代后调用（下一次解码会整体重算）
+    func clearCache() {
+        spanCache.removeAll()
+        scalarCache.removeAll()
+        cachedLexiconGeneration = -1
+    }
+
+    /// 每次查询开头问一次：词表代次没变时只是两次整数比较
+    func invalidateLexiconGenerationIfNeeded() {
+        ensureCacheValid()
+    }
 
     @inline(__always)
     private func logp(prev2: UInt32, prev1: UInt32, target: UInt32) -> Double {

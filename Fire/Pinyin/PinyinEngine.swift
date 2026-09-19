@@ -65,7 +65,7 @@ final class PinyinEngine {
     static let shared = PinyinEngine()
 
     private let lexicon = PinyinLexicon.shared
-    private let decoder = PinyinDecoder()
+    let decoder = PinyinDecoder()
 
     /// 双拼方案；nil = 全拼。
     var scheme: ShuangpinScheme?
@@ -100,6 +100,14 @@ final class PinyinEngine {
 
     /// 词级候选的排序与截断上限。
     static let maxCandidates = 60
+
+    /// 组字区最多吸收多少个键：引擎每键整段重解，开销随音节数涨，
+    /// 不封顶时长串能把主线程拖住。40 键 ≈ 20 个音节（双拼 20 个词），
+    /// 比参考实现 `correction::MAX_LETTERS`（24）宽一倍，正常句子碰不到。
+    static let maxRawKeys = 40
+
+    /// 当前方案是否用到 `;` 键（微软 / 搜狗类的 `ing`）：用到时 `;` 进缓冲区而不是出标点
+    var usesSemicolon: Bool { scheme?.usesSemicolon ?? false }
 
     /// 整句解码试几种切分（参考实现只取最优切分；Fire 的拼音码表没有词频、全靠字级模型分辨，
     /// 多留几条划分让模型自己挑更划算）。
@@ -401,10 +409,24 @@ private extension PinyinEngine {
 
     /// 排序并按词文本去重（同一个词可能被多种切分命中，保留得分最高的一条），最多留 `limit` 条。
     func rank(_ items: inout [Scored], limit: Int, leftContext: String, input: String) {
-        // 远超上限时先按结构键线性选出前面一段：同键内按词库 rank 排，多选一倍留给去重
+        // 远超上限时先按结构键 + 上下文无关先验线性选出前面一段：参考实现这一步用词库词频，
+        // 我们没有词频，用模型从 BOS 走一遍的一元分顶替。
+        // 「先砍一刀」是必要的（单字母简拼一键命中上万条），但砍的口径不能是「谁词短谁留」：
+        // `xi'an` 直查 666 条，按词长砍会把 西安 这类两字词整片砍掉，语言模型根本看不到它们
+        // （实测 西安 连 60 条候选都进不去）。多留一倍给去重留余量。
         if items.count > limit * 4 {
-            items = Array(items.sorted { lhs, rhs in lhs.preselectBetter(than: rhs) }
-                .prefix(limit * 2))
+            var cache: [String: Double] = [:]
+            cache.reserveCapacity(items.count)
+            func scoreOf(_ text: String) -> Double {
+                if let hit = cache[text] { return hit }
+                let value = decoder.wordPrior(text: text)
+                cache[text] = value
+                return value
+            }
+            let ordered: [Scored] = items.sorted { lhs, rhs in
+                lhs.preselectBetter(than: rhs, prior: scoreOf)
+            }
+            items = Array(ordered.prefix(limit * 4))
         }
         for index in items.indices {
             let choice = choiceProvider(String(input.prefix(items[index].coverage)), items[index].text)
@@ -422,16 +444,20 @@ private extension PinyinEngine {
     func contextScore(_ item: Scored, leftContext: String) -> Double {
         decoder.wordLogp(context: leftContext, text: item.text)
     }
+
 }
 
 private extension PinyinEngine.Scored {
-    /// 预选键（不拿文本做平手项）：精确 > 覆盖多 > 简拼少 > 末音节完整 > 词库常用 > 原样 > 词短
-    func preselectBetter(than other: PinyinEngine.Scored) -> Bool {
+    /// 预选键（不拿文本做平手项）：精确 > 覆盖多 > 简拼少 > 末音节完整 > 用户选过 > 先验高 > 原样 > 词短
+    func preselectBetter(than other: PinyinEngine.Scored, prior: (String) -> Double) -> Bool {
         if exact != other.exact { return exact }
         if coverage != other.coverage { return coverage > other.coverage }
         if abbreviated != other.abbreviated { return abbreviated < other.abbreviated }
         if fullLast != other.fullLast { return fullLast }
         if weight != other.weight { return weight > other.weight }
+        let lhsPrior = prior(text)
+        let rhsPrior = prior(other.text)
+        if lhsPrior != rhsPrior { return lhsPrior > rhsPrior }
         if altered != other.altered { return !altered }
         return text.count < other.text.count
     }

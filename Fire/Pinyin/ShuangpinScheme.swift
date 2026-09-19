@@ -78,7 +78,31 @@ struct ShuangpinDecoded: Hashable {
         return tail.isEmpty ? pinyin : "\(pinyin)'\(tail)"
     }
 
-    /// [`pinyin`] 开头 `pinyinLen` 个字母对应多少个键：整单元被盖住才算，
+    /// 消耗开头 `letters` 个**拼音字母**（不含 `'`）需要敲多少个键。
+    ///
+    /// 词级候选的 `coverage` 数的是字母（不同切分之间才可比），而组字区按键结算，
+    /// 中间还夹着 `'`：直接拿字母数当字节偏移，`ni\'hao` 会算成 2 个键而不是 4 个，
+    /// 上屏「你好」后组字区剩一堆键。所以这里逐单元累加字母数，而不是比字节下标。
+    func keys(forPinyinLetters letters: Int) -> Int {
+        var keys = 0
+        var seen = 0
+        var pendingSeparators = 0
+        for unit in units {
+            if unit.isSeparator {
+                pendingSeparators += unit.keys.count
+                continue
+            }
+            guard seen + unit.pinyin.count <= letters else { break }
+            seen += unit.pinyin.count
+            keys += pendingSeparators + unit.keys.count
+            pendingSeparators = 0
+        }
+        // 字母正好消耗到末尾时，后面紧跟的 `'` 也一起吃掉
+        if seen == letters { keys += pendingSeparators }
+        return keys
+    }
+
+    /// [`pinyin`] 开头 `pinyinLen` 个字母（按连接串的字节位算）对应多少个键：整单元被盖住才算，
     /// 紧跟其后的 `'` 一并算上。
     func keys(forPinyinLength pinyinLen: Int) -> Int {
         var keys = 0
@@ -192,6 +216,44 @@ struct ShuangpinScheme: Hashable {
             units.append(unit)
         }
         return ShuangpinDecoded(units: units, tail: chars[index...].joined())
+    }
+
+    /// 按当前键位重算零声母两键写法，与既有写法**合并**（不丢 o 前缀式的方案）。
+    ///
+    /// 自定义方案最容易漏的就是这一栏：漏了之后 `a` / `ai` / `ang` 全打不出来。规则是
+    /// 参考实现五套表反推出来的两条：
+    /// * 原样两字母（`ai` 就敲 `ai`）——单字母音节双写（`a` → `aa`）；
+    /// * 首字母 + 该韵母所在的键（`ang` → `a` + 绑着 `ang` 的 `h` = `ah`）。
+    /// 拿小鹤 / 自然码的韵母键位跑一遍，推出的写法与参考实现表里手写的逐条一致。
+    func derivingZeroInitials() -> [ShuangpinZeroSyllable] {
+        var result = table.zeroInitials
+        for syllable in PinyinSyllables.zeroInitialSyllables {
+            var derived: [String] = []
+            if syllable.count == 1 {
+                // 单元音音节双写（`a` → `aa`）
+                derived.append(syllable + syllable)
+            } else if syllable.count == 2 {
+                // 两个字母的零声母音节可以原样敲（`ai` 就敲 `ai`）
+                derived.append(syllable)
+            }
+            // 韵母可能是整个音节（`ai` 绑在 d）也可能是尾段（`i` 绑在 i），两种都试；
+            // `ang` / `eng` 这三个字母的音节只能走这条（`a` + 绑着 `ang` 的 `h` = `ah`）
+            for final in [String(syllable.dropFirst()), syllable] {
+                for entry in table.finals where entry.finals.contains(final) {
+                    derived.append(String(syllable.first!) + entry.key)
+                }
+            }
+            let existing = result.first { $0.syllable == syllable }?.spellings ?? []
+            var merged = existing
+            for spelling in derived where !merged.contains(spelling) { merged.append(spelling) }
+            guard !merged.isEmpty else { continue }
+            if let index = result.firstIndex(where: { $0.syllable == syllable }) {
+                result[index].spellings = merged
+            } else {
+                result.append(ShuangpinZeroSyllable(syllable: syllable, spellings: merged))
+            }
+        }
+        return result
     }
 
     /// 落单的一键代表的前缀：声母键是声母，元音键是元音本身（`a` 后面可能是 ai / an / ang / ao）。
