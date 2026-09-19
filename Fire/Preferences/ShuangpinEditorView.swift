@@ -21,10 +21,6 @@ import AppKit
 import Defaults
 import UniformTypeIdentifiers
 
-/// 拖拽负载前缀：区分韵元素与声元素（都走同一条 onDrop 通道）。
-private let finalPayloadPrefix = "fire-final:"
-private let initialPayloadPrefix = "fire-initial:"
-
 public struct ShuangpinEditorView: View {
     /// 正在编辑的键位（保存前不写回设置）。
     /// 规则都在 `ShuangpinKeyEditor` 里（纯函数、可单测），这里只负责画与转发
@@ -124,6 +120,16 @@ public struct ShuangpinEditorView: View {
                 revalidate()
             }
             .help("按当前韵母键位把 a/ai/an/ang/… 的两键写法重推一遍")
+            Toggle("占用 ; 键", isOn: Binding(
+                get: { editor.table.semicolon },
+                set: { on in
+                    editor.setUsesSemicolon(on)
+                    if selectedKey == ";" && !on { selectedKey = nil }
+                    revalidate()
+                }
+            ))
+            .toggleStyle(.checkbox)
+            .help("微软 / 搜狗系把 ing 放在 ; 上。勾上后 ; 算一个键位（会出现在第三排末尾，输入时进组字区而不是出标点）")
             Spacer()
             Button("取消") { onFinish(false, nil) }
             Button("保存") {
@@ -294,7 +300,7 @@ public struct ShuangpinEditorView: View {
 
     // MARK: 元素面板
 
-    private func palette(title: String, items: [String], kind: PaletteKind,
+    private func palette(title: String, items: [String], kind: ShuangpinDragPayload.Element,
                          width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.callout.weight(.medium))
@@ -316,7 +322,7 @@ public struct ShuangpinEditorView: View {
         .clipped()
     }
 
-    private func chip(_ item: String, kind: PaletteKind) -> some View {
+    private func chip(_ item: String, kind: ShuangpinDragPayload.Element) -> some View {
         let boundKeys: [String] = kind == .final
             ? table.keysBinding(final: item)
             : table.keysBinding(initial: item)
@@ -340,7 +346,7 @@ public struct ShuangpinEditorView: View {
                 }
             }
             .onDrag {
-                NSItemProvider(object: kind.payloadPrefix + item as NSString)
+                NSItemProvider(object: ShuangpinDragPayload.encode(kind, item) as NSString)
             }
             // 拖不动的场合（触控板手势不灵、辅助输入）给一条点击路径：
             // 先点键帽选中，再点元素 = 绑到选中键
@@ -371,7 +377,7 @@ public struct ShuangpinEditorView: View {
 
     // MARK: 编辑动作（规则在 ShuangpinKeyEditor，这里只管点完要重算校验）
 
-    private func bind(_ kind: PaletteKind, _ value: String, to key: String) {
+    private func bind(_ kind: ShuangpinDragPayload.Element, _ value: String, to key: String) {
         switch kind {
         case .final: editor.bind(final: value, to: key)
         case .initial: editor.bind(initial: value, to: key)
@@ -391,50 +397,30 @@ public struct ShuangpinEditorView: View {
     }
 }
 
-/// 键帽的拖拽接收端：进入/离开给出高亮，松手解析负载。
+/// 键帽的拖拽接收端：进入/离开给出高亮，松手异步取负载。
 private struct KeyDropHandler: DropDelegate {
     let key: String
     let onHover: (Bool) -> Void
-    let onDrop: (_ kind: PaletteKind, _ value: String) -> Void
+    let onDrop: (_ element: ShuangpinDragPayload.Element, _ name: String) -> Void
 
+    // 不在 validateDrop 里读负载：那是主线程上的同步调用点，
+    // 而 NSItemProvider 的取数据回调可能就要在主线程交付 —— 等它就是自锁。
+    // 这里只认「有没有文本」，负载内容留到松手后异步解。
     func validateDrop(info: DropInfo) -> Bool {
-        PaletteKind.parse(from: info) != nil
+        !info.itemProviders(for: [UTType.text]).isEmpty
     }
 
     func dropEntered(info: DropInfo) { onHover(true) }
     func dropExited(info: DropInfo) { onHover(false) }
 
     func performDrop(info: DropInfo) -> Bool {
-        guard let parsed = PaletteKind.parse(from: info) else { return false }
-        onDrop(parsed.kind, parsed.value)
-        return true
-    }
-}
-
-/// 可拖拽的元素种类：韵母 / 声母。
-enum PaletteKind {
-    case final, initial
-
-    /// 负载前缀，见文件头 `finalPayloadPrefix` / `initialPayloadPrefix`
-    var payloadPrefix: String { self == .final ? finalPayloadPrefix : initialPayloadPrefix }
-
-    /// 从拖拽负载解出「哪类元素 + 元素名」；不是本编辑器的负载就返回 nil（不接外部拖拽）
-    static func parse(from info: DropInfo) -> (kind: PaletteKind, value: String)? {
-        guard let provider = info.itemProviders(for: [UTType.text]).first else { return nil }
-        var result: (kind: PaletteKind, value: String)?
-        let semaphore = DispatchSemaphore(value: 0)
+        guard let provider = info.itemProviders(for: [UTType.text]).first else { return false }
         provider.loadObject(ofClass: NSString.self) { object, _ in
-            defer { semaphore.signal() }
-            guard let text = object as? String else { return }
-            for kind in [PaletteKind.final, .initial] {
-                if text.hasPrefix(kind.payloadPrefix) {
-                    result = (kind, String(text.dropFirst(kind.payloadPrefix.count)))
-                    break
-                }
-            }
+            guard let text = object as? String,
+                  let parsed = ShuangpinDragPayload.decode(text) else { return }
+            DispatchQueue.main.async { self.onDrop(parsed.element, parsed.name) }
         }
-        _ = semaphore.wait(timeout: .now() + 0.2)
-        return result
+        return true
     }
 }
 

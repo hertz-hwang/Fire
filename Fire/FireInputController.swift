@@ -1578,8 +1578,10 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         var pinyinRemaining = ""
         var effectiveKeys = committedKeys
         let wasPinyin = _pinyinActive
-        if _pinyinActive, committedKeys == nil,
-           let index = visiblePinyinIndex(of: candidate) {
+        // 拼音：消耗几个键只由「这条候选覆盖了几个字母」决定，调用方给的一律不用。
+        // 候选窗的鼠标点传统一传「已敲键总数」（那不是按键提交，没有键数信息），
+        // 照它结算的话，打 nihao 时点选前缀词「你」会把 hao 的键也一起吞掉。
+        if _pinyinActive, let index = visiblePinyinIndex(of: candidate) {
             let keys = _pinyinAllConsumed[index]
             effectiveKeys = keys
             pinyinRemaining = String(_originalString.dropFirst(min(keys, _originalString.count)))

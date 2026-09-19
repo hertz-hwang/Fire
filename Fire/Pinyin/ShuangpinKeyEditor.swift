@@ -200,3 +200,32 @@ struct ShuangpinKeyEditor {
         return result
     }
 }
+
+/// 键位编辑器的拖拽负载：韵元素与声元素共用一条 onDrop 通道，靠前缀区分。
+///
+/// 编解码放在内核侧（而不是界面文件里）有两个理由：一是纯字符串函数，能脱窗单测
+/// ——拖放这种交互没法在 CI 里点，唯一能证的就是「这串东西解出来是谁」；
+/// 二是界面文件 import SwiftUI，拖进来就毁掉拼音内核「脱离 UI 单编单跑」的性质。
+enum ShuangpinDragPayload {
+    /// 拖的是哪类元素
+    enum Element: Hashable {
+        case final, initial
+
+        var prefix: String { self == .final ? "fire-final:" : "fire-initial:" }
+    }
+
+    static func encode(_ element: Element, _ name: String) -> String {
+        element.prefix + name
+    }
+
+    /// 从负载串解出「哪类元素 + 元素名」；不是本编辑器的负载返回 nil
+    /// （从访达拖个文件进键盘不该改键位）
+    static func decode(_ text: String) -> (element: Element, name: String)? {
+        for element in [Element.final, .initial] {
+            if text.hasPrefix(element.prefix) {
+                return (element, String(text.dropFirst(element.prefix.count)))
+            }
+        }
+        return nil
+    }
+}
