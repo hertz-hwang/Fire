@@ -61,6 +61,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // 整句解码探针：打印候选的各维度打分拆解（显示打分验证/调参归因）
                 exit(SentenceDecodeProbe.run(codes: Array(CommandLine.arguments.dropFirst(2))))
             }
+            if command == "--preview-shuangpin" {
+                // 键位编辑器离屏渲染（调试）：渲成 PNG 后退出，看键盘图排得对不对
+                ShuangpinEditorPreview.run()
+                return false
+            }
             if command == "--pinyin-selftest" {
                 // 拼音方案自检：跑一遍「设置 → 引擎 → 候选」的接线断言后退出
                 PinyinSelfCheck.run()

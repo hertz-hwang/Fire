@@ -65,10 +65,22 @@ public struct ShuangpinEditorView: View {
             header
             keyboard
             selectionDetail
+            // 元素面板：宽度写死。SwiftUI 的 ScrollView 给内容的是「无限主轴宽度」，
+            // LazyVGrid 的 adaptive 列在里面会按无限宽铺下去，实测把整个窗口撑爆、
+            // 键盘被挤出可见区。固定列 + 固定容器宽度才是这里要的形状。
             HStack(alignment: .top, spacing: 14) {
-                palette(title: "韵母（拖到键上）", items: PinyinSyllables.finals, kind: .final)
-                palette(title: "翘舌声母", items: ["zh", "ch", "sh"], kind: .initial)
-                    .frame(maxWidth: 180)
+                palette(title: "韵母（拖到键上）", items: PinyinSyllables.finals, kind: .final,
+                        width: 178)
+                palette(title: "翘舌声母", items: ["zh", "ch", "sh"], kind: .initial, width: 178)
+                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("提示").font(.caption.weight(.medium))
+                    Text("拖动元素到键帽上绑定；先点键帽再点元素同样能绑。\n一个韵母只会在一个键上，拖到新键就是搬走。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: 260, alignment: .leading)
             }
             probeLine
             if !editor.unboundFinals().isEmpty {
@@ -216,7 +228,9 @@ public struct ShuangpinEditorView: View {
     /// 键帽上的小字：有映射声母时先写声母，再挂最多两个韵母
     private func capSummary(key: String, finals: [String], initial: String?) -> String {
         let head = finals.prefix(2).joined(separator: "/")
-        if let initial { return initial + " " + head }
+        // 键帽同时要挂声母与韵母时（v = zh + ui/v）用 · 分隔，
+        // 直接拼空格会读成「sh u」这种看不出谁是谁的样子
+        if let initial { return head.isEmpty ? initial : initial + " · " + head }
         return head
     }
 
@@ -280,19 +294,26 @@ public struct ShuangpinEditorView: View {
 
     // MARK: 元素面板
 
-    private func palette(title: String, items: [String], kind: PaletteKind) -> some View {
+    private func palette(title: String, items: [String], kind: PaletteKind,
+                         width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.callout.weight(.medium))
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 46), spacing: 6)], spacing: 6) {
+            ScrollView(.vertical) {
+                LazyVGrid(columns: [GridItem(.fixed(52), spacing: 6), GridItem(.fixed(52), spacing: 6),
+                                    GridItem(.fixed(52), spacing: 6)],
+                          alignment: .leading, spacing: 6) {
                     ForEach(items, id: \.self) { item in
                         chip(item, kind: kind)
                     }
                 }
                 .padding(2)
             }
-            .frame(maxWidth: .infinity, maxHeight: 150)
         }
+        // 高度钉在**外层容器**上并 clipped：只给 ScrollView 加 frame(height:) 时
+        // 父 VStack 仍按内容的理想高度铺，实测 34 个韵母铺到 ~600pt、
+        // 直接压到下面的「试打」行上（frame 只是提议尺寸，不裁切绘制内容）
+        .frame(width: width, height: 172, alignment: .topLeading)
+        .clipped()
     }
 
     private func chip(_ item: String, kind: PaletteKind) -> some View {
@@ -301,7 +322,7 @@ public struct ShuangpinEditorView: View {
             : table.keysBinding(initial: item)
         return Text(item)
             .font(.system(size: 11, design: .rounded))
-            .frame(maxWidth: .infinity)
+            .frame(width: 52)
             .padding(.vertical, 5)
             .background(RoundedRectangle(cornerRadius: 5)
                 .fill(boundKeys.isEmpty ? Color.primary.opacity(0.06)
@@ -455,5 +476,58 @@ public enum ShuangpinEditorWindow {
         window = win
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+
+/// 离屏渲染预览（调试：`Fire --preview-shuangpin [输出目录]`）。
+///
+/// 键位编辑器是「拖拽 + 键盘图」这种一眼能看出好坏的界面，光看代码不知道
+/// 键帽会不会挤成一团、错位排得对不对。渲成 PNG 直接看（照 CandidatesPreviewRenderer 那套）。
+enum ShuangpinEditorPreview {
+    static func run() {
+        let directory = CommandLine.arguments.count > 2
+            ? CommandLine.arguments[2] : NSTemporaryDirectory()
+        let presets: [(String, ShuangpinKeyTable)] = [
+            ("xiaohe", ShuangpinTables.xiaohe),
+            ("ziranma", ShuangpinTables.ziranma),
+            ("microsoft", ShuangpinTables.microsoft),
+        ]
+        for (name, table) in presets {
+            // 预览时给一个确切尺寸（不是 minHeight）：只给下界时 SwiftUI 会按内容的
+            // 理想高度铺，离屏窗口里就成了「上下都溢出、键盘被顶出可见区」
+            // 背景与外观要显式给：只捕 contentView 时没有窗口底色，
+            // 而 primary 文字会按 light 解析成黑色 —— 渲出来是「黑纸上的黑字」，
+            // 键盘整块看着像没画（其实是画了，看不见）
+            let view = ShuangpinEditorView(table: table) { _, _ in }
+                .background(Color(NSColor.windowBackgroundColor))
+                .frame(width: 820, height: 588, alignment: .topLeading)
+            let hosting = NSHostingView(rootView: view)
+            // 直接渲 NSHostingView 会拿到一张只有按钮的黑图：没有窗口就没有窗口级
+            // 布局环境（动态字体、effectiveAppearance、SwiftUI 的 layout  Pass 都不全）。
+            // 挂到一个从不 orderFront 的窗口上、显式 display() 一次，布局与绘制才跑完。
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 820, height: 620),
+                styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.backgroundColor = .windowBackgroundColor
+            window.contentView = hosting
+            window.setFrame(NSRect(x: 0, y: 0, width: 820, height: 620), display: false)
+            hosting.frame = window.contentLayoutRect
+            window.display()
+            guard let content = window.contentView,
+                  let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds) else {
+                print("[preview] \(name): 拿不到位图上下文")
+                continue
+            }
+            content.cacheDisplay(in: content.bounds, to: rep)
+            rep.size = content.bounds.size
+            let path = "\(directory)/shuangpin-\(name).png"
+            if let data = rep.representation(using: .png, properties: [:]) {
+                try? data.write(to: URL(fileURLWithPath: path))
+                print("[preview] \(path) \(Int(content.bounds.width))x\(Int(content.bounds.height))")
+            }
+        }
+                exit(0)
     }
 }
