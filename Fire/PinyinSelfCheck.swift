@@ -139,6 +139,24 @@ enum PinyinSelfCheck {
         let after = engine.compose("ba", leftContext: "做了")?.candidates.first?.text ?? ""
         check(!bare.isEmpty && !after.isEmpty, "单音节在有无语境下都出候选（\(bare) / \(after)）")
 
+        // ---- 个性化钩子（学习通道 A/B 的接口）----
+        // 不碰真实学习数据（CLI 跑自检时不该开 sqlite / Keychain），
+        // 只验证「钩子装上去，拼音的分数真的跟着走」——那两个通道以前长在整句解码器里，
+        // 拼音换了自己的解码器，接口断在这里就等于「越用越准」对拼音用户悄悄消失。
+        let plain = engine.compose("shijie")?.candidates.first?.score ?? 0
+        let saved = engine.decoder.logpBlender
+        engine.decoder.logpBlender = { base, _, _, target in
+            base + (target == "世".unicodeScalars.first!.value ? 3.0 : 0.0)
+        }
+        let boosted = engine.compose("shijie")
+        engine.decoder.logpBlender = saved
+        let boostedTop = boosted?.candidates.first?.score ?? 0
+        check(boostedTop > plain || boosted?.candidates.first?.text != engine.compose("shijie")?.candidates.first?.text,
+              "逐字分数钩子生效（\(String(format: "%.2f", plain)) → \(String(format: "%.2f", boostedTop))）")
+        // 钩子撤掉后必须回到纯通用模型的分数（评测台跑的就是这个口径）
+        check(abs((engine.compose("shijie")?.candidates.first?.score ?? 0) - plain) < 1e-9,
+              "钩子摘掉后分数回到纯通用模型口径")
+
         // ---- 长度上限 ----
         let long = String(repeating: "wo", count: 40)
         expect(engine.compose(long)?.candidates.isEmpty == false, "超长串仍出候选且不卡死")

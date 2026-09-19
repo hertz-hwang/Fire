@@ -53,6 +53,97 @@ final class PinyinEngineCenter {
             self?.engine.clearCaches()
         }
         .tieToLifetime(of: self)
+        Defaults.observe(keys: .enableLearning, .enableLearningUserNgram,
+                         .enableLearningSessionCache) { [weak self] in
+            self?.refreshLearningFlags()
+        }
+        .tieToLifetime(of: self)
+        // 用户词库（加权词）改了：词级排序的用户分要跟着换
+        NotificationCenter.default.addObserver(
+            forName: DictManager.userDictUpdated, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.refreshUserWeights()
+        }
+        installHooks()
+    }
+
+    // MARK: 个性化（学习通道 A / B + 用户加权词）
+    //
+    // 拼音以前也吃这套：它走整句解码器，那两个通道就长在解码器里。现在拼音有自己的
+    // 解码器，不在这里接回来的话，「越用越准」对拼音用户直接消失。
+    // 接法是把钩子留在内核、把实现放在这里：内核不 import 学习模块，
+    // 才能继续脱离 sqlite / Keychain 单编单跑做评测。
+
+    /// 通道 B 快照与代次（代次换代时作废格子缓存：分数全过期）
+    private var learningSnapshot: LearningSnapshot = .empty
+    private var learningGeneration = -1
+    private var learningTuning = LearningTuning()
+    private var ngramActive = false
+    private var cacheActive = false
+    /// 当前会话（通道 A 的会话缓存在 decoder 上，per-controller）
+    private weak var activeSession: SentenceSession?
+    /// 用户加权词：词 → 折算成「选过次数」的权重
+    private var userWeights: [String: Int] = [:]
+
+    /// 控制器每次查询前报上会话，并把学习状态对齐一次（代次比较，常数级）
+    func beginQuery(session: SentenceSession) {
+        activeSession = session
+        refreshLearningFlags()
+    }
+
+    private func installHooks() {
+        engine.decoder.logpBlender = { [weak self] base, prev2, prev1, target in
+            guard let self else { return base }
+            var score = base
+            if self.ngramActive, let ngram = self.learningSnapshot.ngram,
+               let blended = ngram.blendedLogp(base: base, prev2: prev2, prev1: prev1,
+                                               target: target, tuning: self.learningTuning,
+                                               generalUnigram: NgramModel.shared
+                                                   .generalUnigramProbability(target)) {
+                score = blended
+            }
+            if self.cacheActive, let session = self.activeSession {
+                score += session.decoder.cacheModel.reward(
+                    prev1: prev1, target: target,
+                    weight: self.learningTuning.cacheWeight * self.learningTuning.strength,
+                    maxReward: self.learningTuning.cacheMaxReward,
+                    unigramFactor: self.learningTuning.cacheUnigramFactor)
+            }
+            return score
+        }
+        engine.weightProvider = { [weak self] text in self?.userWeights[text] ?? 0 }
+        refreshUserWeights()
+    }
+
+    /// 学习开关 / 快照代次对齐。逐字钩子里不做这些（每键要问上千次），
+    /// 只在这次查询开头问一次。
+    private func refreshLearningFlags() {
+        let enabled = Defaults[.enableLearning]
+        learningTuning = enabled ? LearningTuning.fromDefaults() : LearningTuning()
+        let generation = enabled ? LearnerCenter.shared.ngramGeneration : 0
+        if generation != learningGeneration {
+            learningSnapshot = enabled ? LearnerCenter.shared.snapshot : .empty
+            learningGeneration = generation
+            // 用户 n-gram 数据变了：旧格子的先验与分数全部过期
+            engine.clearCaches()
+        }
+        ngramActive = enabled && Defaults[.enableLearningUserNgram]
+            && learningSnapshot.ngram?.hasData == true
+        cacheActive = enabled && Defaults[.enableLearningSessionCache]
+            && activeSession.map { !$0.decoder.cacheModel.isEmpty } ?? false
+    }
+
+    /// 加权词 → 「选过的次数」当量。词库权重 1000 是缺省（等于没加权，不给分），
+    /// 往上按每 100 记一次，封顶交给引擎自己的对数 + 封顶（最多约 1.5 分），
+    /// 让语境仍能压过它——参考实现的 weightBonus 就是这个道理。
+    private func refreshUserWeights() {
+        var next: [String: Int] = [:]
+        for entry in DictManager.shared.getUserSupplementEntries() {
+            guard entry.weight > 1000 else { continue }
+            next[entry.text] = min(20, (entry.weight - 1000) / 100)
+        }
+        userWeights = next
+        engine.clearCaches()
     }
 
     /// 需要时载入 / 重建音节索引（幂等，可在每次进中文模式时调）

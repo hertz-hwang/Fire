@@ -111,6 +111,15 @@ final class PinyinDecoder {
 
     private var scalarCache: [String: [UInt32]] = [:]
 
+    /// 逐字分数改写钩子：app 侧在这里把「用户字级 n-gram（学习通道 B）+
+    /// 会话缓存（通道 A）」混进通用模型的分数。
+    ///
+    /// 为什么是钩子而不是直接引用学习模块：内核要能脱离 sqlite / Keychain / UI
+    /// 单编单跑（`tmp/pinyin/` 那一套评测），而形码整句的分数口径也不该被拼音侧牵动。
+    /// 钩子缺席时分数就是纯通用模型——评测台跑的正是这个口径。
+    var logpBlender: ((_ base: Double, _ prev2: UInt32, _ prev1: UInt32,
+                      _ target: UInt32) -> Double)?
+
     /// 占位音节（词库里查不到）的末两字
     private static func tailContext(of text: String, fallback: (UInt32, UInt32)) -> (UInt32, UInt32) {
         let scalars = Array(text.unicodeScalars.map(\.value))
@@ -144,7 +153,11 @@ final class PinyinDecoder {
 
     @inline(__always)
     private func logp(prev2: UInt32, prev1: UInt32, target: UInt32) -> Double {
-        model.loaded ? model.logp(prev2: prev2, prev1: prev1, target: target) : 0.0
+        guard model.loaded else { return 0 }
+        let base = model.logp(prev2: prev2, prev1: prev1, target: target)
+        // 钩子在 model.loaded 之内：模型没载入时 base 恒 0，混什么都还是 0，
+        // 但会让「模型没加载」这条自检断言看起来像通过了
+        return logpBlender.map { $0(base, prev2, prev1, target) } ?? base
     }
 
     private func scalars(of text: String) -> [UInt32] {

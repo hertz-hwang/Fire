@@ -1432,6 +1432,9 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         let center = PinyinEngineCenter.shared
         center.prepareIfNeeded()
         guard center.ready else { return standDown() }
+        // 学习通道（用户 n-gram / 会话缓存）按会话对齐：内核不认得 SentenceSession，
+        // 由这里每次查询报一次，代次比较是常数级
+        center.beginQuery(session: _sentenceSession)
 
         let context = Defaults[.enableSentenceMode] ? _sentenceSession.contextText : ""
         guard let composing = center.engine.compose(_originalString, leftContext: context),
