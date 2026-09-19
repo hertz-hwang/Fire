@@ -30,6 +30,13 @@ struct PinyinComposingCandidate {
     /// 排序分（调试与「显示打分」用）。
     var score: Double
 
+    /// 模糊音 / 敲错写法的代价（正数，已从 `score` 里扣掉）。
+    var penalty: Double
+
+    /// 用户侧加分（加权词 + 这串输入下选过的次数），已含在 `score` 里。
+    /// 整句候选没有这一项。
+    var bonus: Double
+
     /// 靠模糊音 / 敲错读出来的（候选栏可以标个记号，让用户知道这不是自己敲的原话）。
     var altered: Bool
 }
@@ -80,6 +87,8 @@ extension PinyinEngine {
                                                   consumedKeys: consumed,
                                                   isSentence: candidate.isSentence,
                                                   score: candidate.score,
+                                                  penalty: candidate.penalty,
+                                                  bonus: candidate.bonus,
                                                   altered: candidate.altered))
         }
         return PinyinComposing(candidates: items, marked: query.marked, tail: query.tail,
@@ -96,5 +105,19 @@ extension PinyinEngine {
     /// 词表换代后按需作废（每次查询开头问一次，代次没变是两次整数比较的量级）
     func invalidateCachesIfNeeded() {
         decoder.invalidateLexiconGenerationIfNeeded()
+    }
+
+    /// 「显示打分」用：走一遍这条候选的逐字链，拿到模型分在各来源上的构成。
+    ///
+    /// 现算而不是在束搜索里给每个节点都挂上拆解：只有开关真开着、且只对可见的那
+    /// 一页候选跑，解码热路径一分不付。把链上的分拼成完整拆解（再加上加权词、
+    /// 写法代价、重码轻罚）那一步在 app 侧：`SentenceScoreDimensions(pinyin:chain:)`——
+    /// 内核不拿形码那一侧的类型，才能继续脱离 UI 单编单跑；打分串的标签与格式
+    /// 也才跟形码整句共用一份，不会两处各自漂。
+    func modelScoreParts(for candidate: PinyinComposingCandidate,
+                         leftContext: String) -> PinyinLogpParts {
+        // 整句候选的分含结尾 EOS（「句子说完了」），词级候选不含
+        decoder.logpParts(context: leftContext, text: candidate.text,
+                          ending: candidate.isSentence)
     }
 }

@@ -52,6 +52,42 @@ struct PinyinWord: Hashable {
     var syllables: [String]
 }
 
+/// 学习通道给一个字的加分（`PinyinDecoder.learningBonusProvider` 的返回）。
+///
+/// 只报增量、不报总分：通用模型那一头由解码器自己记账，钩子碰不到它。
+/// 否则写歪一点（忘了把 base 带上）就会把「通用ngram」那一项抹平，而总分还看不出出错。
+struct PinyinLearningBonus {
+    /// 通道 B（用户字级 n-gram）相对通用模型的增量
+    var userNgram: Double = 0
+    /// 通道 A（会话缓存）的加分
+    var sessionCache: Double = 0
+
+    var total: Double { userNgram + sessionCache }
+
+    static let none = PinyinLearningBonus()
+}
+
+/// 一个字的逐字分，按来源拆开。
+///
+/// `total` 是实际进分数的值，其余三项是它的构成
+/// （`total == general + userNgram + sessionCache`）。
+///
+/// 之所以要拆到通道级：候选栏的「显示打分」得说清一条候选为什么值这么多分。
+/// 「模型分 + 一堆说不清来源的加分」那种答案没法用来归因。
+struct PinyinLogpParts {
+    /// 通用字级 n-gram 给的分
+    var general: Double = 0
+    /// 学习通道 B（用户字级 n-gram）相对通用模型的增量
+    var userNgram: Double = 0
+    /// 学习通道 A（会话缓存）的加分
+    var sessionCache: Double = 0
+
+    /// 实际参与打分的那一个数
+    var total: Double { general + userNgram + sessionCache }
+
+    static let zero = PinyinLogpParts()
+}
+
 /// 拼音整句解码器。
 final class PinyinDecoder {
     /// 每个格子最多留几个词（按上下文无关先验）。同音词很多，全留会让束搜索白费。
@@ -111,14 +147,14 @@ final class PinyinDecoder {
 
     private var scalarCache: [String: [UInt32]] = [:]
 
-    /// 逐字分数改写钩子：app 侧在这里把「用户字级 n-gram（学习通道 B）+
-    /// 会话缓存（通道 A）」混进通用模型的分数。
+    /// 学习通道加分钩子：app 侧在这里报出「用户字级 n-gram（通道 B）+ 会话缓存（通道 A）」
+    /// 各给这个字加了多少分（只报增量；「显示打分」按通道展示就靠这份报账）。
     ///
     /// 为什么是钩子而不是直接引用学习模块：内核要能脱离 sqlite / Keychain / UI
     /// 单编单跑（`tmp/pinyin/` 那一套评测），而形码整句的分数口径也不该被拼音侧牵动。
     /// 钩子缺席时分数就是纯通用模型——评测台跑的正是这个口径。
-    var logpBlender: ((_ base: Double, _ prev2: UInt32, _ prev1: UInt32,
-                      _ target: UInt32) -> Double)?
+    var learningBonusProvider: ((_ base: Double, _ prev2: UInt32, _ prev1: UInt32,
+                      _ target: UInt32) -> PinyinLearningBonus)?
 
     /// 占位音节（词库里查不到）的末两字
     private static func tailContext(of text: String, fallback: (UInt32, UInt32)) -> (UInt32, UInt32) {
@@ -152,12 +188,20 @@ final class PinyinDecoder {
     }
 
     @inline(__always)
-    private func logp(prev2: UInt32, prev1: UInt32, target: UInt32) -> Double {
-        guard model.loaded else { return 0 }
+    private func logpParts(prev2: UInt32, prev1: UInt32, target: UInt32) -> PinyinLogpParts {
+        guard model.loaded else { return .zero }
         let base = model.logp(prev2: prev2, prev1: prev1, target: target)
         // 钩子在 model.loaded 之内：模型没载入时 base 恒 0，混什么都还是 0，
         // 但会让「模型没加载」这条自检断言看起来像通过了
-        return logpBlender.map { $0(base, prev2, prev1, target) } ?? base
+        guard let provider = learningBonusProvider else { return PinyinLogpParts(general: base) }
+        let bonus = provider(base, prev2, prev1, target)
+        return PinyinLogpParts(general: base, userNgram: bonus.userNgram,
+                               sessionCache: bonus.sessionCache)
+    }
+
+    @inline(__always)
+    private func logp(prev2: UInt32, prev1: UInt32, target: UInt32) -> Double {
+        logpParts(prev2: prev2, prev1: prev1, target: target).total
     }
 
     private func scalars(of text: String) -> [UInt32] {
@@ -369,6 +413,41 @@ final class PinyinDecoder {
 }
 
 extension PinyinDecoder {
+    /// 逐字链走一遍，把分数按来源拆开（「显示打分」用）。
+    ///
+    /// 只在候选栏要显示打分时对**可见候选**跑：一条候选几十字符、一页最多 9 条，
+    /// 比给 beam 里每个节点都挂上分数来源便宜得多——热路径一行不动是这里的取舍。
+    /// 走的链与 `wordLogp` 逐字一致，所以下游拿「总分 − 拆出来的各项」当结构项残差是成立的。
+    ///
+    /// - Parameter ending: 要不要补上结尾 EOS。整句候选的分含 EOS（「句子说完了」），
+    ///   词级候选不含。
+    func logpParts(context: String, text: String, ending: Bool) -> PinyinLogpParts {
+        var prev2 = NgramModel.bos
+        var prev1 = NgramModel.bos
+        for scalar in context.unicodeScalars.suffix(2) {
+            prev2 = prev1
+            prev1 = scalar.value
+        }
+        var general = 0.0
+        var user = 0.0
+        var cache = 0.0
+        func take(_ target: UInt32) {
+            let parts = logpParts(prev2: prev2, prev1: prev1, target: target)
+            general += parts.general
+            user += parts.userNgram
+            cache += parts.sessionCache
+        }
+        for scalar in scalars(of: text) {
+            take(scalar)
+            prev2 = prev1
+            prev1 = scalar
+        }
+        if ending {
+            take(NgramModel.eos)
+        }
+        return PinyinLogpParts(general: general, userNgram: user, sessionCache: cache)
+    }
+
     /// 词在给定左上下文下的逐字 logp（`log P(词 | 上文末两字)`）：词级候选的上下文得分，
     /// 与整句路径同一套分数口径。参考实现词级排序里的 `transition_log_prob` 在本模型下的替身。
     func wordLogp(context: String, text: String) -> Double {

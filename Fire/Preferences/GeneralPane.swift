@@ -189,7 +189,7 @@ struct GeneralPane: View {
                     .disabled(isPinyin || !sentenceAvailableForTable)
                 if enableSentenceMode {
                     PreferenceToggleRow(title: "显示打分", caption: "整句候选末尾显示加权得分", isOn: $enableSentenceScore)
-                        .help("在各整句候选末尾显示各维度加权得分（通用ngram、用户ngram等），颜色/字号/加粗可在主题 JSON 中配置")
+                        .help("在整句候选末尾显示各维度加权得分（通用ngram、用户ngram等），颜色/字号/加粗可在主题 JSON 中配置。拼音 / 双拼下逐条候选都标（整个候选栏就是按这份分排的）")
                     PreferenceToggleRow(title: "自动上屏", isOn: $enableSentenceAutoCommit)
                         // 拼音方案统一空格上屏：不可启用自动上屏
                         .disabled(isPinyin)

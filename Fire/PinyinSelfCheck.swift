@@ -139,17 +139,79 @@ enum PinyinSelfCheck {
         let after = engine.compose("ba", leftContext: "做了")?.candidates.first?.text ?? ""
         check(!bare.isEmpty && !after.isEmpty, "单音节在有无语境下都出候选（\(bare) / \(after)）")
 
+        // ---- 「显示打分」的拆解 ----
+        // 这个开关以前只接了形码整句，拼音 / 双拼的候选栏一个分都看不到；而拆解是
+        // 显示时现走一遍逐字链算的，不是解码时记的账——不对账就等于在骗人。
+        func dims(_ item: PinyinComposingCandidate) -> SentenceScoreDimensions {
+            SentenceScoreDimensions(pinyin: item,
+                                    chain: engine.modelScoreParts(for: item, leftContext: ""))
+        }
+        if let word = engine.compose("kf")?.candidates.first {
+            let parts = dims(word)
+            check(abs(parts.sum - word.score) < 1e-9,
+                  "词级候选的打分拆解与总分守恒（\(word.text)）")
+            check(abs(parts.structural) < 1e-9,
+                  "词级候选没有组句结构项（实得 \(parts.structural)）")
+            check(!parts.generalNgram.isZero, "词级候选拆得出通用ngram分")
+        } else {
+            fail("kf 应该有候选（打分拆解无从验证）")
+        }
+        if let frame = engine.compose("woxiangqubeijingdeshihou"),
+           let sentence = frame.candidates.first(where: { $0.isSentence }) {
+            let parts = dims(sentence)
+            check(abs(parts.sum - sentence.score) < 1e-9,
+                  "整句候选的打分拆解与总分守恒（\(sentence.text)）")
+            let shown = parts.displayText()
+            check(shown.contains("通用ngram")
+                  && (abs(parts.structural) < 0.005 || shown.contains("组句项")),
+                  "整句打分串拿得出维度标签：\(shown)")
+        } else {
+            fail("woxiangqubeijingdeshihou 应该出整句候选（打分拆解无从验证）")
+        }
+        // 模糊音 / 敲错的代价要单开一项：混进通用分里就看不出这条候选是被改过的读法
+        PinyinSettings.save(fuzzyRules: varRules { $0.zZh = true })
+        center.applySettings()
+        let altered = engine.compose("zongguo")?.candidates.first { $0.penalty > 0 }
+        PinyinSettings.save(fuzzyRules: .none)
+        center.applySettings()
+        if let altered {
+            let parts = dims(altered)
+            check(parts.spelling < 0 && parts.displayText().contains("写法"),
+                  "模糊音命中的候选拆得出「写法」代价：\(parts.displayText())")
+            check(abs(parts.sum - altered.score) < 1e-9, "扣了写法代价后拆解仍与总分守恒")
+        } else {
+            fail("开 z↔zh 后 zongguo 应有一条带写法代价的候选（代价归因无从验证）")
+        }
+        // 学习通道的分要能归到它自己那一头上（混进「通用ngram」就是假归因）。
+        // 注意拆解必须在钩子还挂着的时候算：拆的是「现在这条钩子加了多少分」，
+        // 摘了钩子再去拆一个带着学习分算出来的 score，两边对不上账。
+        let savedBlend = engine.decoder.learningBonusProvider
+        engine.decoder.learningBonusProvider = { _, _, _, target in
+            PinyinLearningBonus(sessionCache: target == "世".unicodeScalars.first!.value ? 1.5 : 0)
+        }
+        let boostedFrame = engine.compose("shijie")
+        let boostedWorld = boostedFrame?.candidates.first(where: { $0.text == "世界" })
+        let attributed = boostedWorld.map(dims)
+        engine.decoder.learningBonusProvider = savedBlend
+        if let parts = attributed, let boostedWorld {
+            check(abs(parts.sessionCache - 1.5) < 1e-9 && parts.userNgram.isZero,
+                  "会话缓存的加分落在「会话缓存」项（\(parts.sessionCache)）")
+            check(abs(parts.sum - boostedWorld.score) < 1e-9, "混入学习分后拆解仍与总分守恒")
+        } else {
+            fail("shijie 应该出 世界（通道归因无从验证）")
+        }
+
         // ---- 个性化钩子（学习通道 A/B 的接口）----
         // 不碰真实学习数据（CLI 跑自检时不该开 sqlite / Keychain），
         // 只验证「钩子装上去，拼音的分数真的跟着走」——那两个通道以前长在整句解码器里，
         // 拼音换了自己的解码器，接口断在这里就等于「越用越准」对拼音用户悄悄消失。
         let plain = engine.compose("shijie")?.candidates.first?.score ?? 0
-        let saved = engine.decoder.logpBlender
-        engine.decoder.logpBlender = { base, _, _, target in
-            base + (target == "世".unicodeScalars.first!.value ? 3.0 : 0.0)
+        let saved = engine.decoder.learningBonusProvider
+        engine.decoder.learningBonusProvider = { _, _, _, target in
+            PinyinLearningBonus(userNgram: target == "世".unicodeScalars.first!.value ? 3.0 : 0)
         }
         let boosted = engine.compose("shijie")
-        engine.decoder.logpBlender = saved
+        engine.decoder.learningBonusProvider = saved
         let boostedTop = boosted?.candidates.first?.score ?? 0
         check(boostedTop > plain || boosted?.candidates.first?.text != engine.compose("shijie")?.candidates.first?.text,
               "逐字分数钩子生效（\(String(format: "%.2f", plain)) → \(String(format: "%.2f", boostedTop))）")

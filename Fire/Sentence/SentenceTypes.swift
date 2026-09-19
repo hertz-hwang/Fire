@@ -106,10 +106,18 @@ struct SentenceScoreDimensions {
     var sessionCache: Double = 0
     /// 加权词：supplement 匹配奖励
     var supplement: Double = 0
+    /// 写法代价：模糊音 / 敲错变体命中（拼音侧在用；形码整句这一项恒为 0）
+    var spelling: Double = 0
     /// 纠错：学习通道 C1 纠错对加分
     var correction: Double = 0
     /// 组句项：出字奖励、词库序轻罚、整码单字奖励等 beam 结构项
     var structural: Double = 0
+
+    /// 各维度之和。必须恒等于候选的 `score`：对不上账的拆解比没有拆解更坏，
+    /// 拿它归因的人会被带偏到其实没动过的那一维上。
+    var sum: Double {
+        generalNgram + userNgram + sessionCache + supplement + correction + spelling + structural
+    }
 
     /// 候选栏打分串：非零维度按固定顺序拼接（两位小数，正值带 + 号）
     func displayText() -> String {
@@ -124,6 +132,7 @@ struct SentenceScoreDimensions {
         append("会话缓存", sessionCache)
         append("加权词", supplement)
         append("纠错", correction)
+        append("写法", spelling)
         append("组句项", structural)
         return parts.joined(separator: " ")
     }

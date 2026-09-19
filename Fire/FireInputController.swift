@@ -1498,10 +1498,14 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
 
         var all: [Candidate] = []
         var consumed: [Int] = []
+        // 与 `all` 一一对齐：这条候选是引擎哪一条（用户短语没有分，填 nil）。
+        // 「显示打分」只给当前页那几条算维度拆解——全列表 60 条都算等于把逐字链重走 60 遍。
+        var sources: [PinyinComposingCandidate?] = []
         if !userMatches.isEmpty {
             for user in userMatches {
                 all.append(user)
                 consumed.append(_originalString.count)
+                sources.append(nil)
             }
         }
         for item in composing.candidates where !userTexts.contains(item.text) {
@@ -1509,6 +1513,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
                                  text: item.text,
                                  type: item.isSentence ? .sentence : .py))
             consumed.append(max(1, min(item.consumedKeys, _originalString.count)))
+            sources.append(item)
         }
         guard !all.isEmpty else { return standDown() }
 
@@ -1519,7 +1524,20 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         if curPage > pageCount { curPage = pageCount }
         let start = (curPage - 1) * pageSize
         let end = min(start + pageSize, all.count)
-        _candidates = Array(all[start ..< end])
+        // 「显示打分」：拼音/双拼的候选栏以前一个分都看不到（这个开关只接了形码整句）。
+        // 引擎每条候选都是打分驱动排序的，不开显示则一分不算。
+        let wantsScore = Defaults[.enableSentenceScore]
+        let engine = center.engine
+        _candidates = (start ..< end).map { index in
+            guard wantsScore, let source = sources[index] else { return all[index] }
+            let text = SentenceScoreDimensions(
+                pinyin: source,
+                chain: engine.modelScoreParts(for: source, leftContext: context)).displayText()
+            guard !text.isEmpty else { return all[index] }
+            let candidate = all[index]
+            return Candidate(code: candidate.code, text: candidate.text, type: candidate.type,
+                             label: candidate.label, scoreText: text)
+        }
         _pinyinConsumed = Array(consumed[start ..< end])
         _hasNext = curPage < pageCount
         _pageCount = pageCount

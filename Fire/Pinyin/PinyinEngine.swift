@@ -35,6 +35,13 @@ struct PinyinCandidate {
     /// 覆盖的输入字母数（不含 `'`）。
     var coverage: Int
 
+    /// 模糊音 / 敲错写法的代价（正数，已从 `score` 里扣掉了）。「显示打分」用。
+    var penalty: Double
+
+    /// 用户侧加分（加权词 + 这串输入下选过的次数，已含在 `score` 里）。
+    /// 整句路径不带这一项，词级候选才有。
+    var bonus: Double
+
     /// 靠模糊音 / 敲错变体命中（候选拼音与敲的不同）。
     var altered: Bool
 }
@@ -232,7 +239,7 @@ final class PinyinEngine {
         candidates.append(contentsOf: scored.map { item in
             PinyinCandidate(text: item.text, segmented: item.syllables.joined(separator: "'"),
                             isSentence: false, score: item.score, coverage: item.coverage,
-                            altered: item.penalty > 0)
+                            penalty: item.penalty, bonus: item.bonus, altered: item.penalty > 0)
         })
 
         // 整句候选：至少两个音节才有（空格上屏的就是它）。
@@ -311,7 +318,8 @@ final class PinyinEngine {
         guard top.wordCount >= 2 else { return nil }
         let coverage = best.letters
         return PinyinCandidate(text: top.text, segmented: top.segmented, isSentence: true,
-                               score: top.score, coverage: coverage, altered: top.altered)
+                               score: top.score, coverage: coverage,
+                               penalty: top.penalty, bonus: 0, altered: top.altered)
     }
 
     // MARK: - 写法展开
@@ -422,6 +430,8 @@ private extension PinyinEngine {
         var weight: Int
         /// 模糊音 / 敲错变体命中的代价
         var penalty: Double
+        /// 用户侧加分（加权词 + 选过的次数），已含在 `score` 里
+        var bonus: Double = 0
         /// 上下文得分（已含用户加分与代价）
         var score: Double = 0
 
@@ -451,8 +461,12 @@ private extension PinyinEngine {
         }
         for index in items.indices {
             let choice = choiceProvider(String(input.prefix(items[index].coverage)), items[index].text)
+            // 用户加分单独留一份：「显示打分」要说清这一条里有多少是分词本身的、
+            // 有多少是用户自己惯出来的
+            let bonus = PinyinEngine.weightBonus(items[index].weight + choice)
+            items[index].bonus = bonus
             items[index].score = contextScore(items[index], leftContext: leftContext)
-                + PinyinEngine.weightBonus(items[index].weight + choice)
+                + bonus
                 - items[index].penalty
         }
         items.sort { lhs, rhs in lhs.sortBetter(than: rhs) }

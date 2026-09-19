@@ -709,9 +709,7 @@ final class SentenceDecoder {
             all.append(candidate)
             // 维度拆解必须与总分守恒（「显示打分」的可信度保证）
             #if DEBUG
-            let dims = candidate.dimensions
-            let dimsSum = dims.generalNgram + dims.userNgram + dims.sessionCache
-                + dims.supplement + dims.correction + dims.structural
+            let dimsSum = candidate.dimensions.sum
             assert(abs(dimsSum - candidate.score) < 1e-6,
                    "score dimensions mismatch: sum=\(dimsSum) score=\(candidate.score)")
             #endif

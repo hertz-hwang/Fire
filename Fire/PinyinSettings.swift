@@ -99,24 +99,25 @@ final class PinyinEngineCenter {
     }
 
     private func installHooks() {
-        engine.decoder.logpBlender = { [weak self] base, prev2, prev1, target in
-            guard let self else { return base }
-            var score = base
+        engine.decoder.learningBonusProvider = { [weak self] base, prev2, prev1, target in
+            guard let self else { return .none }
+            var bonus = PinyinLearningBonus()
             if self.ngramActive, let ngram = self.learningSnapshot.ngram,
                let blended = ngram.blendedLogp(base: base, prev2: prev2, prev1: prev1,
                                                target: target, tuning: self.learningTuning,
                                                generalUnigram: NgramModel.shared
                                                    .generalUnigramProbability(target)) {
-                score = blended
+                // 通道 B 是插值而不是加成：报的是相对通用模型的那一段增量
+                bonus.userNgram = blended - base
             }
             if self.cacheActive, let session = self.activeSession {
-                score += session.decoder.cacheModel.reward(
+                bonus.sessionCache = session.decoder.cacheModel.reward(
                     prev1: prev1, target: target,
                     weight: self.learningTuning.cacheWeight * self.learningTuning.strength,
                     maxReward: self.learningTuning.cacheMaxReward,
                     unigramFactor: self.learningTuning.cacheUnigramFactor)
             }
-            return score
+            return bonus
         }
         engine.weightProvider = { [weak self] text in self?.userWeights[text] ?? 0 }
     }
@@ -273,4 +274,29 @@ enum PinyinSettings {
         .init(title: "en ↔ eng", detail: "「恩 / 鞥」", get: \.enEng, set: { $0.enEng = $1 }),
         .init(title: "in ↔ ing", detail: "「因 / 英」", get: \.inIng, set: { $0.inIng = $1 }),
     ]
+}
+
+// MARK: - 「显示打分」：拼音候选 → 候选栏的维度拆解
+
+extension SentenceScoreDimensions {
+    /// 拼音候选的分拆成候选栏共用的那一份维度。
+    ///
+    /// 标签与拼接沿用形码整句的 `displayText()`——两种方案共用同一个打分列，
+    /// 各自维护一份格式早晚漂成两种写法。内核只报数（`PinyinLogpParts`），
+    /// 它不该拿形码那一侧的类型，否则拼音内核就脱离不开整句模块了。
+    ///
+    /// `chain`：引擎现走一遍逐字链拿到的模型分构成（通用 / 用户 ngram / 会话缓存）。
+    /// 候选自己带着剩下的分量：`bonus` = 加权词 + 选过次数，`penalty` = 模糊音 / 敲错写法代价。
+    /// 对不上账的差额全归到组句项（重码轻罚、词库查不到时的占位扣分），
+    /// 所以 `sum` 恒等于 `candidate.score`。
+    init(pinyin candidate: PinyinComposingCandidate, chain: PinyinLogpParts) {
+        let spelling = -candidate.penalty
+        self.init(generalNgram: chain.general,
+                  userNgram: chain.userNgram,
+                  sessionCache: chain.sessionCache,
+                  supplement: candidate.bonus,
+                  spelling: spelling,
+                  correction: 0,
+                  structural: candidate.score - chain.total - candidate.bonus - spelling)
+    }
 }
