@@ -109,6 +109,24 @@ final class PinyinEngine {
     /// 当前方案是否用到 `;` 键（微软 / 搜狗类的 `ing`）：用到时 `;` 进缓冲区而不是出标点
     var usesSemicolon: Bool { scheme?.usesSemicolon ?? false }
 
+    /// 参与词级查词的切分：全拼输入下只看「每个音节都完整」的那几种。
+    ///
+    /// 简拼切法（`xi a wu`、`zh ou`…）是给「用户真敲了简拼」准备的；输入本身
+    /// 有完整读法时它们只会把单字母前缀位置的查词量炸开（一个 `a…` 位下面几千条），
+    /// 而且这些读法在排序键第 3 档（非末尾简拼数）上必输——白花时间的活。
+    /// 整条输入只有简拼切法时（`kf`）不受影响：那时没有全完整切分可留。
+    private func wordSegmentations(_ all: [PinyinSegmentation]) -> [PinyinSegmentation] {
+        let clean = all.filter { $0.innerAbbreviatedCount == 0 }
+        let picked = clean.isEmpty ? all : clean
+        return Array(picked.prefix(Self.wordSegmentations))
+    }
+
+    /// 词级查词最多试几种切分。
+    static var wordSegmentations = 4
+
+    /// 前缀词最少枚举到第几个音节（从末尾数）。
+    static var prefixWordLookbehind = 6
+
     /// 整句解码试几种切分（参考实现只取最优切分；Fire 的拼音码表没有词频、全靠字级模型分辨，
     /// 多留几条划分让模型自己挑更划算）。
     static var sentenceSegmentations = 4
@@ -165,9 +183,7 @@ final class PinyinEngine {
 
         var candidates: [PinyinCandidate] = []
         var scored: [Scored] = []
-        let logTotal = log(Double(max(lexicon.entryCount, 1)))
-        _ = logTotal
-        for segmentation in segmentations {
+        for segmentation in wordSegmentations(segmentations) {
             let expanded = expandedPositions(segmentation, typos: correction == nil)
             let patterns = segmentation.patterns
             let count = patterns.count
@@ -188,8 +204,13 @@ final class PinyinEngine {
             }
             // 输入的前缀也出候选（`kaifazhe` → 开发、开），否则长句没法逐词上屏。
             // 只收音节数正好等于前缀长度的词，更长的词会与输入后面的音节冲突。
+            //
+            // 只枚举末尾这么多条前缀：排序键里「覆盖字母多者优先」排第一，
+            // 长输入下 1-2 个音节的前缀词根本排不进可视候选，却要每条几万次查词
+            // （20 音节的句子光前缀就 19 轮查词，逐键延迟 p95 顶到 17ms）。
             if count > 1 {
-                for prefixLength in stride(from: count - 1, through: 1, by: -1) {
+                let shortest = max(1, count - Self.prefixWordLookbehind)
+                for prefixLength in stride(from: count - 1, through: shortest, by: -1) {
                     let prefix = Array(positions[0 ..< prefixLength])
                     let prefixLetters = patterns[0 ..< prefixLength].reduce(0) { $0 + $1.text.count }
                     let prefixAbbreviated = PinyinSegmentation.abbreviatedCount(
