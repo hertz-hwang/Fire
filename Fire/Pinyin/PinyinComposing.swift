@@ -24,7 +24,7 @@ struct PinyinComposingCandidate {
     /// 上屏时消耗几个**敲的键**（不是字母）。
     var consumedKeys: Int
 
-    /// 是否整句候选（多词拼成、覆盖全部已敲字母）。
+    /// 是否整句引擎打分的候选（路径分含 EOS、覆盖全部已敲字母；前五固定是这类）。
     var isSentence: Bool
 
     /// 排序分（调试与「显示打分」用）。

@@ -77,6 +77,16 @@ enum PinyinSelfCheck {
         expect(engine.compose("nihao")?.candidates.first?.text == "你好", "全拼 nihao 首选你好")
         expect(engine.compose("nihao")?.candidates.first?.consumedKeys == 5, "全拼整词吃满 5 键")
         expect(engine.compose("nihao")?.marked == "ni'hao", "组字区显示分段拼音")
+        // 候选栏前五固定给整句引擎「单字重码组句」打分的 top5（拼音 / 双拼同路）
+        if let top = engine.compose("nihao")?.candidates.prefix(5), top.count == 5 {
+            expect(top.allSatisfy { $0.isSentence && $0.consumedKeys == 5 },
+                   "前五全是吃满全码的整句打分候选：\(top.map(\.text))")
+            expect(Set(top.map(\.text)).count == 5, "前五彼此不同文")
+        } else {
+            fail("nihao 前五应有 5 条")
+        }
+        expect(engine.compose("ni")?.candidates.first?.isSentence == false,
+               "单音节没有组句，前五仍是词级单字重码")
         expect(engine.compose("kf")?.candidates.contains { $0.text == "开发" } == true,
                "简拼 kf 出 开发（今天的拼音路径做不到这一条）")
         expect(engine.compose("kaif")?.candidates.contains { $0.text == "开" } == true,
@@ -176,7 +186,7 @@ enum PinyinSelfCheck {
             SentenceScoreDimensions(pinyin: item,
                                     chain: engine.modelScoreParts(for: item, leftContext: ""))
         }
-        if let word = engine.compose("kf")?.candidates.first {
+        if let word = engine.compose("kf")?.candidates.first(where: { !$0.isSentence }) {
             let parts = dims(word)
             check(abs(parts.sum - word.score) < 1e-9,
                   "词级候选的打分拆解与总分守恒（\(word.text)）")

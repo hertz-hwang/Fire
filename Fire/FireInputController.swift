@@ -1550,8 +1550,8 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
     }
 
     /// 整句候选分支是否可用：开关 + 引擎可用 + 不落入各特例早退分支。
-    /// 拼音方案不走这里：它的整句由 `PinyinEngine` 自己出（候选栏里第 1 条），
-    /// 把拼音键送进虎整句边表只会整句全打不中。
+    /// 拼音方案不走这里：它的整句由 `PinyinEngine` 自己出（候选栏前五就是
+    /// 整句引擎「单字重码组句」打分的 top5），把拼音键送进虎整句边表只会整句全打不中。
     private func sentenceBranchAllowed() -> Bool {
         guard Defaults[.enableSentenceMode] else { return false }
         guard Defaults[.codeMode] != .pinyin else { return false }

@@ -4,6 +4,8 @@
 //
 //  拼音查询管线：敲的键 → 切分 →（不像话则纠错）→ 每个音节位置的多种写法 →
 //  词级候选 + 整句候选 → 排序。双拼在前置一步 `ShuangpinScheme.decode` 后与全拼同路。
+//  候选栏前五固定显示整句引擎「单字重码组句」打分的 top5：词图收词 + 每个音节位
+//  的全部同码重码单字（非首选单字也参与组句），束搜索按分数取前五条整句路径。
 //
 //  排序规则：7 级排序键，越小越靠前：
 //  1. 音节数与输入完全一致的词优先（`kaifa` → 开发 排在 开发者 前）
@@ -25,7 +27,8 @@ struct PinyinCandidate {
     /// 编码回显（分段拼音，`kai'fa`）。
     var segmented: String
 
-    /// 是整句候选（多词拼成）。
+    /// 是整句引擎打分的候选：词图路径分（含结尾 EOS）、盖满全部已敲字母。
+    /// 候选栏前五固定是这一类；路径本身可能就是一个整词（`nihao` → 你好）。
     var isSentence: Bool
 
     /// 排序用的最终分（词级 = 上下文分 + 用户加分 − 代价；整句 = 路径分）。
@@ -137,6 +140,9 @@ final class PinyinEngine {
     /// 多留几条划分让模型自己挑更划算）。
     static var sentenceSegmentations = 4
 
+    /// 候选栏固定给整句引擎「单字重码组句」打分 top 的位数（拼音 / 双拼统一）。
+    static var sentenceTopSlots = 5
+
     /// 用户选择次数加分系数与封顶（取对数加封顶，不封顶时语境压不过它）。
     static let weightBonus = 0.5
     static let weightCap = 20
@@ -243,27 +249,72 @@ final class PinyinEngine {
                             penalty: item.penalty, bonus: item.bonus, altered: item.penalty > 0)
         })
 
-        // 整句候选：至少两个音节才有（空格上屏的就是它）。
+        // 候选栏前五固定给整句引擎「单字重码组句」打分的 top5（拼音 / 双拼同路）：
+        // 词图收词 + 每个音节位的全部同码重码单字，束搜索按整句分数取前五条路径。
+        // 至少两个音节才有（空格上屏的就是第一条）。
         // 不止解最优切分：词图按「音节格子」建，一条切分定死一种音节划分，
         // `xian` 取了 `xi an` 就读不到「先」这类整体词——前 K 种切分各解一遍、
-        // 按分数合一条，才把码表里那些跨音节划分的长词都喂给语言模型（实测 K=1 → K=4
+        // 按分数合前五，才把码表里那些跨音节划分的长词都喂给语言模型（实测 K=1 → K=4
         // 在同一份句子集上首选命中率 +7 个点）。
-        var sentences: [PinyinCandidate] = []
+        var scoredSentences: [PinyinCandidate] = []
         for best in sentenceSegmentations(segmentations) {
             let sentencePositions = expandedPositions(best, typos: correction == nil)
-            if let sentence = plainSentence(sentencePositions, best: best,
-                                            leftContext: leftContext, existing: &candidates) {
-                sentences.append(sentence)
-            }
+            scoredSentences.append(contentsOf: sentenceTop5(sentencePositions, best: best,
+                                                            leftContext: leftContext,
+                                                            existing: &candidates))
         }
-        if let best = sentences.max(by: { $0.score < $1.score }) {
-            // 中文优先：整句先进去占第一
-            candidates.insert(best, at: 0)
+        // 跨切分按分数合前五占住开头；同文的词级候选从后面撤掉——
+        // 前五占掉的文本不再出第二遍。
+        let top = Self.topSentences(scoredSentences)
+        if !top.isEmpty {
+            let taken = Set(top.map(\.text))
+            candidates.removeAll { taken.contains($0.text) }
+            candidates.insert(contentsOf: top, at: 0)
         }
         return PinyinQuery(candidates: candidates, segmentations: segmentations, tail: tail,
                            marked: markedText(scope: scope, decoded: decoded, tail: tail,
                                               segmentations: segmentations, correction: correction),
                            correction: correction, decoded: decoded)
+    }
+
+    /// 整句引擎「单字重码组句」打分的 top5：词图 = 词 + 每个音节位的全部同码重码
+    /// 单字（非首选单字参与组句），束搜索按分数取前 `sentenceTopSlots` 条整句路径。
+    /// 至少两个音节才谈得上组句；单音节本来就在选单字重码，词级列表不动。
+    /// `existing` 用来判断「敲的拼音本身就是一个词」时不许让不按原样读的路径压过它。
+    private func sentenceTop5(_ expanded: PinyinExpanded, best: PinyinSegmentation,
+                              leftContext: String,
+                              existing: inout [PinyinCandidate]) -> [PinyinCandidate] {
+        let patterns = best.patterns
+        guard patterns.count >= 2 else { return [] }
+        var paths = decoder.decode(positions: expanded.patterns,
+                                   penaltyOf: { expanded.cost($0, $1) },
+                                   leftContext: leftContext, limit: Self.sentenceTopSlots)
+        // 不按原样读的路径（敲错边 / 模糊音）不许压过「敲的拼音本身就是一个词」：
+        // `jineng` 按 `jin eng` 切时词图里没有 技能，敲错边读出 近藤
+        if let top = paths.first, top.altered {
+            let letters = best.concatenated
+            let spelledExactly = existing.contains { $0.syllablesJoined == letters }
+            if spelledExactly {
+                paths = decoder.decode(positions: expanded.patterns,
+                                       penaltyOf: { _, _ in 0 },
+                                       leftContext: leftContext, limit: Self.sentenceTopSlots)
+            }
+        }
+        return paths.compactMap { path in
+            guard path.syllableCount == patterns.count, !path.text.isEmpty else { return nil }
+            return PinyinCandidate(text: path.text, segmented: path.segmented, isSentence: true,
+                                   score: path.score, coverage: best.letters,
+                                   penalty: path.penalty, bonus: 0, altered: path.altered)
+        }
+    }
+
+    /// 跨切分合并整句候选：按分数降序、同文去重（留分高的那条），取前五。
+    static func topSentences(_ items: [PinyinCandidate]) -> [PinyinCandidate] {
+        guard !items.isEmpty else { return [] }
+        var seen = Set<String>()
+        return Array(items.sorted { $0.score > $1.score }
+            .filter { seen.insert($0.text).inserted }
+            .prefix(sentenceTopSlots))
     }
 
     /// 参与整句解码的切分：只允许「每个音节都完整」的读法（末尾还没打完的那一个除外）。
@@ -290,37 +341,6 @@ final class PinyinEngine {
             return tail.isEmpty ? first.joined("'") : "\(first.joined("'"))'\(tail)"
         }
         return scope
-    }
-
-    /// 整段拼音的整句候选。`existing` 用来判断「敲的拼音本身就是一个词」时不许让改过的路径压过它。
-    private func plainSentence(_ expanded: PinyinExpanded, best: PinyinSegmentation,
-                               leftContext: String,
-                               existing: inout [PinyinCandidate]) -> PinyinCandidate? {
-        let patterns = best.patterns
-        guard patterns.count >= 2 else { return nil }
-        var paths = decoder.decode(positions: expanded.patterns,
-                                   penaltyOf: { expanded.cost($0, $1) },
-                                   leftContext: leftContext, limit: 2)
-        // 不按原样读的路径（敲错边 / 模糊音）不许压过「敲的拼音本身就是一个词」：
-        // `jineng` 按 `jin eng` 切时词图里没有 技能，敲错边读出 近藤
-        if let top = paths.first, top.altered {
-            let letters = best.concatenated
-            let spelledExactly = existing.contains { $0.syllablesJoined == letters }
-            if spelledExactly {
-                paths = decoder.decode(positions: expanded.patterns,
-                                       penaltyOf: { _, _ in 0 },
-                                       leftContext: leftContext, limit: 2)
-            }
-        }
-        guard let top = paths.first, top.syllableCount == patterns.count, !top.text.isEmpty else {
-            return nil
-        }
-        // 整段本来就是一个词时不出整句（词级排序更可信）
-        guard top.wordCount >= 2 else { return nil }
-        let coverage = best.letters
-        return PinyinCandidate(text: top.text, segmented: top.segmented, isSentence: true,
-                               score: top.score, coverage: coverage,
-                               penalty: top.penalty, bonus: 0, altered: top.altered)
     }
 
     // MARK: - 写法展开
