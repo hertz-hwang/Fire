@@ -16,7 +16,7 @@
 
 import Foundation
 
-/// 声母键（键 → 声母）。
+/// 声母键（键 → 声母）。`initial == ""` 是墓碑：这个键明确不作声母。
 struct ShuangpinInitialKey: Codable, Hashable {
     var key: String
     var initial: String
@@ -36,8 +36,9 @@ struct ShuangpinZeroSyllable: Codable, Hashable {
 
 /// 一套双拼方案的键位表（可序列化，自定义方案就存这个）。
 struct ShuangpinKeyTable: Codable, Hashable {
-    /// 翘舌声母映射。只列与字母本身不同的声母，其余辅音键（含 `y` `w`）就是自己；
-    /// 非声母键不在此列。
+    /// 声母映射：只列**偏离默认**的键（小鹤的 `v → zh`、互换后的 `n → l`）；
+    /// 没列出的辅音键（含 `y` `w`）按「字母自己当声母」。`initial == ""` 是墓碑：
+    /// 这个键被拖走/禁用后不再回落「字母自己」。
     var initials: [ShuangpinInitialKey] = []
 
     /// 韵母键 → 可能的韵母，按优先级排（同一键配同一声母能拼出两个合法音节时取前面的，
@@ -98,14 +99,10 @@ struct ShuangpinKeyTable: Codable, Hashable {
         finals.filter { $0.finals.contains(final) }.map(\.key)
     }
 
-    /// 某个键当声母时的映射（表序第一个）。
+    /// 某个键的显式声母映射（表序第一个）。nil = 无映射（回落「字母自己」）；
+    /// `""` = 墓碑（不作声母）。按键问「它当什么声母」请用 `ShuangpinScheme.initial(_:)`。
     func mappedInitial(for key: String) -> String? {
         initials.first { $0.key == key }?.initial
-    }
-
-    /// 某个声母由哪些键表示。
-    func keysBinding(initial: String) -> [String] {
-        initials.filter { $0.initial == initial }.map(\.key)
     }
 
     /// 键位表里出现过的全部韵母（含重复），自定义编辑器的「已绑定」统计用。

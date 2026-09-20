@@ -124,7 +124,7 @@ private struct ShuangpinOverview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
-                Text("声母键 \(table.initials.count) 个 · 韵母键 \(table.finals.count) 个 · 零声母 \(table.zeroInitials.count) 个")
+                Text("声母键 \(table.initials.filter { !$0.initial.isEmpty }.count) 个 · 韵母键 \(table.finals.count) 个 · 零声母 \(table.zeroInitials.count) 个")
                     .font(.callout)
                 if table.semicolon {
                     Text("占用 ; 键")

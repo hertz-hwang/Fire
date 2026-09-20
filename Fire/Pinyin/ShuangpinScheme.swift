@@ -143,11 +143,18 @@ struct ShuangpinScheme: Hashable {
             || (character == ";" && usesSemicolon)
     }
 
-    /// 键 `key` 当声母时是什么：翘舌声母按方案映射，其他辅音（含 y w）是自己，
-    /// 元音键与 `;` 不是声母。
+    /// 键 `key` 当声母时是什么：显式映射优先（含墓碑——`""` 表示这键被拖走/禁用，
+    /// 不再当声母），没映射的辅音（含 y w）是字母自己，元音键与 `;` 不是声母。
     func initial(_ key: String) -> String? {
-        if let mapped = table.mappedInitial(for: key) { return mapped }
+        if let mapped = table.mappedInitial(for: key) { return mapped.isEmpty ? nil : mapped }
         return PinyinSyllables.initials.first { $0.count == 1 && $0.hasPrefix(key) }
+    }
+
+    /// 当前由哪个键表示这个声母：显式绑定优先，否则是字母本身（该键没被拖走/禁用时）。
+    /// nil = 没有任何键表示它（被搬走又被解绑），以它为声母的音节打不出来。
+    func key(forInitial initial: String) -> String? {
+        if let mapped = table.initials.first(where: { $0.initial == initial })?.key { return mapped }
+        return initial.count == 1 && self.initial(initial) == initial ? initial : nil
     }
 
     /// 键 `key` 当韵母时的候选韵母（按优先级）。
@@ -180,7 +187,7 @@ struct ShuangpinScheme: Hashable {
             .filter({ syllable.hasPrefix($0) })
             .max(by: { $0.count < $1.count }) else { return nil }
         let final = String(syllable.dropFirst(initial.count))
-        let first = table.initials.first { $0.initial == initial }?.key ?? String(initial.first!)
+        guard let first = key(forInitial: initial) else { return nil }
         guard let second = table.finals.first(where: { $0.finals.contains(final) })?.key else {
             return nil
         }

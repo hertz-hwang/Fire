@@ -130,6 +130,10 @@ enum PinyinSelfCheck {
             if entry.key == "y" { next.finals = ["ing", "un"] }
             return next
         }
+        // 普通声母也改一个：n / l 互换键位（编辑器里 bind(initial:to:) 干的就是这个）
+        var swapped = ShuangpinKeyEditor(table: custom)
+        swapped.bind(initial: "l", to: "n")
+        custom = swapped.table
         guard let json = try? JSONEncoder().encode(custom),
               let jsonString = String(data: json, encoding: .utf8) else {
             fail("自定义表 JSON 编码失败")
@@ -143,6 +147,8 @@ enum PinyinSelfCheck {
         check(engine.scheme?.table == custom, "设置→引擎：自定义表生效")
         expect(engine.compose("xypy")?.marked == "xing'ping",
                "自定义表把 ing 挪到 y 后 xypy 解成 xing'ping")
+        expect(engine.compose("lihc")?.marked == "ni'hao", "n/l 互换后 lihc 解成 ni'hao")
+        expect(engine.compose("nihc")?.marked == "li'hao", "n/l 互换后 nihc 解成 li'hao")
         // 坏 JSON 不能把拼音方案整个打死：回落小鹤
         Defaults[.pinyinCustomTable] = "{坏掉的键位表"
         center.applySettings()

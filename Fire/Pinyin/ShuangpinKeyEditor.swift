@@ -2,7 +2,7 @@
 //  ShuangpinKeyEditor.swift
 //  Fire
 //
-//  自定义双拼的键位编辑操作：把「拖一个韵母到某个键上」这类动作写成纯函数。
+//  自定义双拼的键位编辑操作：把「拖一个韵母 / 声母到某个键上」这类动作写成纯函数。
 //
 //  界面（`ShuangpinEditorView`）只负责渲染与转发，规则都在这里——
 //  于是绑键/解绑/优先级/零声母重算/校验能脱离窗口单测（`tmp/pinyin/shuangpin`），
@@ -29,7 +29,7 @@ struct ShuangpinKeyEditor {
     /// 某个键上当前的韵母（按优先级）。
     /// 别命名成 `final(of:)`：`final` 是声明修饰关键字，调用点会被解析成属性而不是方法。
     func finals(of key: String) -> [String] { table.finals(for: key) }
-    /// 某个键当前映射的声母（翘舌类才需要显式绑）
+    /// 某个键当前的**显式**声母映射：nil = 无映射（字母自己当声母），`""` = 墓碑（不作声母）。
     func initial(of key: String) -> String? { table.mappedInitial(for: key) }
 
     // MARK: 绑韵母
@@ -86,30 +86,68 @@ struct ShuangpinKeyEditor {
 
     // MARK: 绑声母
 
-    /// 把翘舌声母绑到某个键（`v → zh`）。同样是一绑一走：一个声母只认一个键。
+    /// 把一个声母绑到某个键（任意声母，不只是翘舌）：`v → zh`、`n → l` 都行。
+    ///
+    /// 与韵母一样「一绑一走」：一个声母只认一个键。不同在于普通声母的默认键位
+    /// 是字母本身（键 `b` 就是声母 `b`），所以搬普通声母要多处理两件事：
+    ///
+    /// * 旧键靠字母本身代表它 → 在旧键落一个**空声母**（`initial == ""`）当墓碑，
+    ///   否则 `b` 键仍按「字母自己」当声母 `b`，一个声母占两个键；
+    /// * 目标键上已有声母 → **互换**：被顶下的声母接住腾空的旧键。
+    ///   把 `l` 拖到 `n` 上，得到 n 键出声母 l、l 键出声母 n，一个都不丢。
+    ///
+    /// 两种情况会留下「没有键的声母」：声母本来就没键而目标键上有声母（被顶下的
+    /// 那位无家可归）、或对有键的键直接禁用。`unencodableSyllables()` 会把那组
+    /// 音节整组列进编不出清单，保存弹窗拦得住。
     @discardableResult
     mutating func bind(initial: String, to key: String) -> Bool {
         guard keys.contains(key), !initial.isEmpty else { return false }
-        var initials = table.initials
-        for index in initials.indices where initials[index].initial == initial {
-            initials[index].initial = ""
+        let from = scheme.key(forInitial: initial)
+        guard from != key else { return false }
+        let displaced = scheme.initial(key)
+        if let from {
+            // 旧键：有被顶下的声母就交给它（互换）；没有就删绑定（原本显式绑的）
+            // 或落墓碑（原本靠字母本身的）
+            let wasExplicit = table.initials.contains { $0.key == from && $0.initial == initial }
+            setInitialMapping(from, to: displaced ?? (wasExplicit ? nil : ""))
         }
-        initials.removeAll { $0.initial.isEmpty }
-        if let index = initials.firstIndex(where: { $0.key == key }) {
-            if initials[index].initial == initial { return false }
-            initials[index].initial = initial
-        } else {
-            initials.append(ShuangpinInitialKey(key: key, initial: initial))
-        }
-        table.initials = initials
+        // 绑回键自己的字母 = 回到默认，删条目即可（墓碑也一并清掉），与内置表存储一致
+        setInitialMapping(key, to: key == initial ? nil : initial)
         return true
     }
 
+    /// 禁用一个键作声母（落墓碑）：`b` 键可以只当韵母键。禁用后原声母没有键，
+    /// `unencodableSyllables()` 会报；`unbindInitial` 恢复默认。
+    @discardableResult
+    mutating func disableInitial(_ key: String) -> Bool {
+        guard keys.contains(key), scheme.initial(key) != nil,
+              table.mappedInitial(for: key) != "" else { return false }
+        setInitialMapping(key, to: "")
+        return true
+    }
+
+    /// 解绑 = 恢复该键的默认：删掉显式绑定或墓碑，辅音键回到「字母自己当声母」。
     @discardableResult
     mutating func unbindInitial(_ key: String) -> Bool {
         let before = table.initials.count
         table.initials.removeAll { $0.key == key }
         return table.initials.count != before
+    }
+
+    /// 写一个键的声母映射：nil = 删条目（回落默认），`""` = 墓碑，其他 = 显式绑。
+    private mutating func setInitialMapping(_ key: String, to value: String?) {
+        if let index = table.initials.firstIndex(where: { $0.key == key }) {
+            if let value { table.initials[index].initial = value } else { table.initials.remove(at: index) }
+            return
+        }
+        guard let value else { return }
+        let entry = ShuangpinInitialKey(key: key, initial: value)
+        // 新键按字母序插入：面板遍历与差分对比都靠稳定的顺序（与绑韵母同规）
+        if let at = table.initials.firstIndex(where: { $0.key > key }) {
+            table.initials.insert(entry, at: at)
+        } else {
+            table.initials.append(entry)
+        }
     }
 
     // MARK: 零声母

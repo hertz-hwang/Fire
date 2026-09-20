@@ -5,8 +5,10 @@
 //  自定义双拼键位编辑器：模拟键盘图 + 可拖拽的声母 / 韵元素。
 //
 //  交互：
-//  * 把右侧的韵母 / 翘舌声母拖到键盘上的某个键 → 绑到那个键（一个键可以挂多个韵母，
+//  * 把右侧的韵母 / 声母拖到键盘上的某个键 → 绑到那个键（一个键可以挂多个韵母，
 //    从上到下就是优先级；同一个韵母只会在一个键上，拖到新键等于搬走）。
+//  * 声母同样可改（不只翘舌）：拖到已有声母的键上是**互换**（l 拖到 n，n 接住 l 的键）；
+//    拖到元音键上是搬走，原键不再当声母；选中键帽还能单独禁用 / 恢复某个键作声母。
 //  * 点键帽选中它，下方列出它当前的绑定，可以逐个解绑、调整优先级。
 //  * 「按键位重算零声母」把 a/ai/an/… 的两键写法按当前韵母键位重推一遍
 //    （自定义方案最容易忘的就是这一栏，忘了一半的零声母音节打不出来）。
@@ -67,11 +69,11 @@ public struct ShuangpinEditorView: View {
             HStack(alignment: .top, spacing: 14) {
                 palette(title: "韵母（拖到键上）", items: PinyinSyllables.finals, kind: .final,
                         width: 178)
-                palette(title: "翘舌声母", items: ["zh", "ch", "sh"], kind: .initial, width: 178)
+                palette(title: "声母（拖到键上）", items: PinyinSyllables.initials, kind: .initial, width: 178)
                 Spacer(minLength: 0)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("提示").font(.caption.weight(.medium))
-                    Text("拖动元素到键帽上绑定；先点键帽再点元素同样能绑。\n一个韵母只会在一个键上，拖到新键就是搬走。")
+                    Text("拖动元素到键帽上绑定；先点键帽再点元素同样能绑。\n一个韵母只会在一个键上，拖到新键就是搬走；声母拖到已有声母的键上是互换。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -227,26 +229,34 @@ public struct ShuangpinEditorView: View {
         .help(hint(for: key))
     }
 
-    /// 键帽上的小字：有映射声母时先写声母，再挂最多两个韵母
+    /// 键帽上的小字：有映射声母时先写声母（墓碑画 ✕），再挂最多两个韵母
     private func capSummary(key: String, finals: [String], initial: String?) -> String {
         let head = finals.prefix(2).joined(separator: "/")
         // 键帽同时要挂声母与韵母时（v = zh + ui/v）用 · 分隔，
         // 直接拼空格会读成「sh u」这种看不出谁是谁的样子
-        if let initial { return head.isEmpty ? initial : initial + " · " + head }
+        if let initial {
+            // 墓碑：这键被拖走/禁用后不再当声母，光看韵母会忘掉它以前是声母键
+            if initial.isEmpty { return head.isEmpty ? "✕" : "✕ · " + head }
+            return head.isEmpty ? initial : initial + " · " + head
+        }
         return head
     }
 
     private func hint(for key: String) -> String {
         var lines: [String] = ["键「\(key)」"]
         if let initial = table.mappedInitial(for: key) {
-            lines.append("声母：\(initial)")
+            lines.append(initial.isEmpty ? "声母：已禁用（不再当声母）" : "声母：\(initial)")
+        } else if let implicit = scheme.initial(key) {
+            lines.append("声母：\(implicit)（默认，把别的声母拖过来即换键）")
         }
         let finals = table.finals(for: key)
         if !finals.isEmpty {
             lines.append("韵母（按优先级）：" + finals.joined(separator: "、"))
         }
         if finals.isEmpty && table.mappedInitial(for: key) == nil {
-            lines.append("未绑定：把右侧元素拖过来")
+            lines.append(scheme.initial(key) != nil
+                         ? "还没挂韵母：把右侧韵母拖过来"
+                         : "未绑定：把右侧元素拖过来")
         }
         return lines.joined(separator: "\n")
     }
@@ -259,11 +269,25 @@ public struct ShuangpinEditorView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Text("键「\(key)」").font(.callout.weight(.medium))
-                    if let initial = table.mappedInitial(for: key) {
+                    if let initial = table.mappedInitial(for: key), !initial.isEmpty {
                         Text("声母 \(initial)")
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(Color.accentColor.opacity(0.15), in: Capsule())
                         Button("解绑声母") { editor.unbindInitial(key); revalidate() }
+                            .help("删掉这条映射：辅音键回到「字母自己当声母」")
+                            .controlSize(.small)
+                    } else if table.mappedInitial(for: key) == "" {
+                        Text("不作声母")
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.15), in: Capsule())
+                        Button("恢复默认声母") { editor.unbindInitial(key); revalidate() }
+                            .controlSize(.small)
+                    } else if let implicit = scheme.initial(key) {
+                        Text("声母 \(implicit)（默认）")
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.12), in: Capsule())
+                        Button("禁用") { editor.disableInitial(key); revalidate() }
+                            .help("把这个键从声母里摘出去；原声母会暂时没有键，编不出的音节会列在下方")
                             .controlSize(.small)
                     }
                     Spacer()
@@ -319,9 +343,10 @@ public struct ShuangpinEditorView: View {
     }
 
     private func chip(_ item: String, kind: ShuangpinDragPayload.Element) -> some View {
+        // 声母的当前键位要问方案：显式绑定与「字母自己」（默认键位）都算已绑
         let boundKeys: [String] = kind == .final
             ? table.keysBinding(final: item)
-            : table.keysBinding(initial: item)
+            : [scheme.key(forInitial: item)].compactMap { $0 }
         return Text(item)
             .font(.system(size: 11, design: .rounded))
             .frame(width: 52)
@@ -350,7 +375,10 @@ public struct ShuangpinEditorView: View {
                 guard let key = selectedKey else { return }
                 bind(kind, item, to: key)
             }
-            .help(boundKeys.isEmpty ? "拖到键盘上的键位绑定" : "已绑在 \(boundKeys.joined(separator: "、"))")
+            .help(boundKeys.isEmpty ? "拖到键盘上的键位绑定"
+                    : kind == .initial && boundKeys.first == item
+                    ? "默认就在 \(item) 键，拖到别的键即换（与那键的声母互换）"
+                    : "已绑在 \(boundKeys.joined(separator: "、"))")
     }
 
     // MARK: 试打
