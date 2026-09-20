@@ -150,7 +150,6 @@ struct GeneralPane: View {
                     Picker("", selection: $code) {
                         Text("码表").tag(CodeMode.wubi)
                         Text("拼音").tag(CodeMode.pinyin)
-                        Text("码表拼音混合").tag(CodeMode.wubiPinyin)
                     }
                     .labelsHidden()
                     .onChange(of: code) { _ in

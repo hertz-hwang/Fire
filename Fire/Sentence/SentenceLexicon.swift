@@ -6,7 +6,7 @@
 //  内置方案：形码模式整句码表按所选码表自动匹配（Resources/schemas 下
 //  sentence-codes-tiger.txt / sentence-codes-liuli.txt /
 //  sentence-codes-amrfliuli.txt）；
-//  拼音模式直接使用所选拼音码表（schemas/py_table.txt）。
+//  拼音模式直接使用所选拼音码表（schemas/py.hdict，`.hdict` 私有容器）。
 //  与虎整句一致：不使用用户词覆盖层，rank 完全由码表文件序决定。
 //
 //  全部方案码表统一为「候选\t编码」格式（前三行 # 元数据注释）；
@@ -148,8 +148,9 @@ final class SentenceLexicon {
 
     /// 默认整句码表（无法判定形码方案时的兜底）
     static let defaultCodesFileName = "sentence-codes-tiger.txt"
-    /// 拼音模式整句码表：直接用所选拼音码表（py_table.txt）
-    static let pinyinCodesFileName = "py_table.txt"
+    /// 拼音模式整句码表：直接用所选拼音词库（内置那份是 `.hdict` 容器）；
+    /// 用户自选路径失效时的兜底。
+    static let pinyinCodesFileName = "py.hdict"
     /// 内置码表目录（Resources/schemas）
     private var schemasDir: String { SchemaCatalog.schemasDirectory }
 
@@ -201,7 +202,7 @@ final class SentenceLexicon {
     private func candidateTablePaths(mode: CodeMode) -> [String] {
         var paths: [String] = []
         if mode == .pinyin {
-            // 拼音模式：整句词图直接用所选拼音码表（py_table.txt）；
+            // 拼音模式：整句词图直接用所选拼音词库（py.hdict）；
             // 用户自定义路径失效时回落 Resources/schemas 内置表
             let pyPath = Defaults[.pyTablePath]
             if !pyPath.isEmpty { paths.append(pyPath) }
@@ -218,8 +219,9 @@ final class SentenceLexicon {
         return paths
     }
 
-    /// 解析整句码表。全部方案码表统一为「候选\t编码」
-    /// （前三行 # 元数据注释；文件序 = rank）。
+    /// 解析整句码表。方案码表统一为「候选\t编码」（前三行 # 元数据注释，文件序 = rank），
+    /// `.hdict` 容器与明文 txt 同一套解析（`HDict.tableText`），
+    /// 行尾可选的第三列（词频）只用于写表时定序，这里不重复用。
     /// 整句编码只用这张表（与虎整句 schema 的"运行时明文码表、无用户覆盖"一致）。
     private func build(mode: CodeMode) -> Snapshot? {
         let isPinyin = mode == .pinyin
@@ -233,16 +235,14 @@ final class SentenceLexicon {
         var loadedPath: String?
 
         for path in candidateTablePaths(mode: mode) where FileManager.default.fileExists(atPath: path) {
-            guard let handle = FileHandle(forReadingAtPath: path) else { continue }
-            defer { try? handle.close() }
-            let data = handle.readDataToEndOfFile()
-            guard let text = String(data: data, encoding: .utf8) else { continue }
+            guard let text = HDict.tableText(path: path) else { continue }
             loadedPath = path
             for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-                // 只支持统一格式：`候选\t编码`（# 注释与空行跳过）
+                // 统一格式：`候选\t编码[\t词频]`（# 注释与空行跳过）
                 if line.hasPrefix("#") { continue }
-                let parts = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
-                guard parts.count == 2 else { continue }
+                // maxSplits 2：词频列单独切掉，不让它混进编码里
+                let parts = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
+                guard parts.count >= 2 else { continue }
                 let entryText = parts[0].trimmingCharacters(in: .whitespaces)
                 let code = parts[1].trimmingCharacters(in: .whitespaces)
                 guard !entryText.isEmpty, isSimpleCode(code) else { continue }

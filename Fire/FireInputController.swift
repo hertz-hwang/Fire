@@ -886,8 +886,8 @@ class FireInputController: IMKInputController {
                 return nil
             }
             // 拼音：同样设长度上限。引擎每键从头重解，开销随音节数涨，
-            // 不封顶时长串能把主线程拖住（上限 40 键 ≈ 20 个音节，比参考实现的
-            // 纠错上界宽一倍，正常句子远碰不到）
+            // 不封顶时长串能把主线程拖住（上限 PinyinEngine.maxRawKeys = 256 键，
+            // 与整句手动上限同量级，正常句子远碰不到）
             if _pinyinActive && _originalString.count >= PinyinEngine.maxRawKeys {
                 return nil
             }

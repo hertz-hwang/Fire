@@ -139,7 +139,7 @@ extension Defaults.Keys {
         "extraCandidateSelectKeys",
         default: .semicolonQuote
     )
-    static let codeMode = Key<CodeMode>("codeMode", default: CodeMode.wubiPinyin)
+    static let codeMode = Key<CodeMode>("codeMode", default: CodeMode.wubi)
     // 拼音输入方式（编码方案=拼音时生效）：全拼 / 小鹤双拼 / 自然码双拼 / 自定义双拼
     static let pinyinLayout = Key<PinyinLayout>("pinyinLayout", default: PinyinLayout.fullPinyin)
     // 自定义双拼键位表（ShuangpinKeyTable 的 JSON）；空 = 未编辑过（按小鹤起步）
@@ -227,9 +227,11 @@ extension Defaults.Keys {
         "wbTableURL",
         default: Bundle.main.resourceURL?.appendingPathComponent("schemas/tiger_table.txt").path
             ?? "")
+    /// 拼音词库：默认 `.hdict` 私有容器（rime 字词库合并注音 + 词频，deflate 压缩）。
+    /// 面板可换成本地明文码表（`候选\t连写全拼[\t词频]`），两种读法见 `HDict.tableText`。
     static let pyTablePath = Key<String>(
         "pyTableURL",
-        default: Bundle.main.resourceURL?.appendingPathComponent("schemas/py_table.txt").path
+        default: Bundle.main.resourceURL?.appendingPathComponent("schemas/py.hdict").path
             ?? "")
     // 拆分表，用于候选词悬浮提示拆分信息
     static let charDivTablePath = Key<String>(
@@ -297,12 +299,34 @@ struct Candidate: Hashable {
 enum CodeMode: Int, CaseIterable, Decodable, Encodable, Defaults.Serializable {
     case wubi
     case pinyin
-    case wubiPinyin
+}
+
+/// 已下线的「码表拼音混合」方案（原 rawValue == 2）：老配置一律归到「码表」。
+/// 必须在**第一次读 `Defaults[.codeMode]` 之前**跑一次：Defaults 解不出未知枚举值时
+/// 只默默回落缺省值，磁盘上仍留着旧值，下次加回同值枚举就会翻旧账。
+/// Codable 桥把枚举写成字符串（`"0"`/`"1"`），兼容可能残留的数字写法。
+func migrateRemovedMixedCodeMode() {
+    let key = "codeMode"
+    let legacyMixed = 2
+    guard let raw = UserDefaults.standard.object(forKey: key) else { return }
+    let stored: Int?
+    if let text = raw as? String {
+        stored = Int(text)
+    } else if let number = raw as? NSNumber {
+        stored = number.intValue
+    } else if let data = raw as? Data {
+        stored = Int(String(data: data, encoding: .utf8) ?? "")
+    } else {
+        stored = nil
+    }
+    guard stored == legacyMixed else { return }
+    UserDefaults.standard.set("\(CodeMode.wubi.rawValue)", forKey: key)
+    NSLog("[Fire] 码表拼音混合方案已下线，编码方案归到码表")
 }
 
 /// 拼音输入方式：全拼，或某种双拼（两键一音节）。
-/// 双拼只改「键 → 音节」的映射，切分 / 查词 / 组句 / 排序全部复用全拼那套管线的
-/// （参考实现 `shuangpin/mod.rs` 的原话：壳与词库都不知道双拼的存在），
+/// 双拼只改「键 → 音节」的映射，切分 / 查词 / 组句 / 排序全部复用全拼那套管线
+/// （壳与词库都不知道双拼的存在），
 /// 所以新增一种方案 = 加一张键位表，不是加一条管线。
 enum PinyinLayout: Int, CaseIterable, Decodable, Encodable, Defaults.Serializable {
     case fullPinyin   // 全拼

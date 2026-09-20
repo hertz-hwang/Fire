@@ -2,7 +2,7 @@
 //  PinyinSelfCheck.swift
 //  Fire
 //
-//  拼音方案自检（命令行 `Fire --selfcheck-pinyin`，跑完即退，不初始化输入法）。
+//  拼音方案自检（命令行 `Fire --pinyin-selftest`，跑完即退，不初始化输入法）。
 //
 //  与离线 harness（`tmp/pinyin/`）的分工：harness 只编 `Fire/Pinyin/`，证的是算法；
 //  这里跑的是 **app 里那一遍**——Defaults → `PinyinEngineCenter` → 引擎 → 候选，
@@ -47,8 +47,27 @@ enum PinyinSelfCheck {
 
         let center = PinyinEngineCenter.shared
         check(!Defaults[.pyTablePath].isEmpty, "拼音码表路径可解析：\(Defaults[.pyTablePath])")
+        // ---- 词库容器 ----
+        // 内置拼音词库是随包分发的 `.hdict`（二进制头 + 压缩负载）：包装坏了、
+        // 同步盘只拉了一半……都得在自检里当场报出来，而不是等用户发现「某个词打不出来」。
+        let bundledDict = SchemaCatalog.schemasDirectory.appending("/py.hdict")
+        check(FileManager.default.fileExists(atPath: bundledDict),
+              "内置拼音词库在包内：\((bundledDict as NSString).lastPathComponent)")
+        let containerProblems = HDict.verify(at: bundledDict)
+        check(containerProblems.isEmpty, "容器体检：\(containerProblems.first ?? "头部/负载 CRC / 词条数全部对上")")
+        if let head = HDict.header(at: bundledDict) {
+            check(head.kind == .pinyin, "容器 kind = 拼音：\(String(describing: head.kind))")
+            check(head.hasWeightColumn, "容器带词频列（同码重码按它排序）")
+            check(head.entryCount > 100_000, "容器词条 \(head.entryCount)")
+            check(head.storedBytes < head.payloadBytes, "容器已压缩：\(head.storedBytes)/\(head.payloadBytes) 字节")
+        }
         check(center.prepareSync(), "音节索引载入")
         check(center.ready, "引擎就绪")
+        // 生效词库就是这份容器时，解析条数必须与头部声明一致（少一批词条 = 表被改过）
+        if Defaults[.pyTablePath] == bundledDict, let head = HDict.header(at: bundledDict) {
+            check(PinyinLexicon.shared.entryCount == head.entryCount,
+                  "索引词条 \(PinyinLexicon.shared.entryCount) == 容器声明 \(head.entryCount)")
+        }
         check(NgramModel.shared.loaded, "字级 ngram 模型已载入（拼音的分数全靠它）")
         let engine = center.engine
 
@@ -81,6 +100,17 @@ enum PinyinSelfCheck {
         expect(engine.compose("nihk")?.candidates.first?.text == "你好", "自然码 nihk 首选你好")
         expect(engine.compose("udpn")?.marked == "shuang'pin",
                "自然码 udpn → shuang'pin（实际 \(engine.compose("udpn")?.marked ?? "∅")）")
+
+        // ---- 整句词图也要吃 `.hdict` ----
+        // 拼音引擎没就绪时控制器回落到词库分支，整句那条路读的是同一份容器；
+        // 解析器只认两列的老格式，就会「拼音能打字但整句没词」，很难往词库上想。
+        SentenceLexicon.shared.rebuildSync(codeMode: .pinyin)
+        let graph = SentenceLexicon.shared
+        check(graph.built && graph.entryCount > 10_000,
+              "拼音整句词图从容器建出：\(graph.entryCount) 边 / \(graph.codeCount) 码")
+        check(graph.loadedPath == Defaults[.pyTablePath],
+              "整句词图用的就是所选拼音词库：\(graph.loadedPath ?? "∅")")
+        check((graph.edges(for: "kaifa") ?? []).contains { $0.text == "开发" }, "整句边表 kaifa 有 开发")
 
         // ---- 自定义双拼：改一个键位，引擎要跟着改 ----
         var custom = ShuangpinTables.xiaohe

@@ -4,15 +4,15 @@
 //
 //  拼音词图上的整句解码：束搜索 + 逐字语言模型打分。
 //
-//  结构与参考实现 `sentence::viterbi::convert_paths` 同构（格子 = 覆盖若干个连续音节的词，
-//  每格只留上下文无关分最高的几条，路径分 = 各步转移分之和），有两处按本项目的模型换了口径：
+//  解码骨架是经典 Viterbi：格子 = 覆盖若干个连续音节的词，每格只留上下文无关分
+//  最高的几条，路径分 = 各步转移分之和。两处按本项目的模型定口径：
 //
-//  * **状态是末两字，不是前一个词**。参考实现的语言模型是词级 bigram（`log P(词|前词)`），
-//    Fire 保留的是自己的字级三级插值 n-gram（`TCSKNM02`，`logp(prev2, prev1, 下一字)`），
+//  * **状态是末两字，不是前一个词**。语言模型用字级三级插值 n-gram
+//    （`TCSKNM02`，`logp(prev2, prev1, 下一字)`）而不是词级 bigram（`log P(词|前词)`），
 //    转移分因此是「把这个词的逐字链接在末两字后面」，与形码整句那条路径同一套分数口径。
 //    同一格里末两字相同的路径合并成一条（真 Viterbi），束宽只花在真正不同的上下文上。
 //  * **格子的上下文无关先验用模型自己算**（从 BOS 走一遍逐字链）再按重码序号轻罚。
-//    参考实现的词库带真实词频，用它排格子；拼音码表只有「文件序 = 常用序」，
+//    拼音码表只有「文件序 = 常用序」，拿不到真实词频用来排格子；
 //    同码内的序号在跨码比较（简拼格子一个字母下面几十个不同音节）时没有分辨力，
 //    一元概率是本模型现成且更强的替身。
 //
@@ -99,6 +99,7 @@ final class PinyinDecoder {
 
     /// 每个位置最多保留几条部分路径。
     static var beamWidth = 32
+
 
     /// 非首选词轻罚系数（与形码整句 `SentenceConfig.rankPenalty` 同值，同一套分数口径）。
     static let rankPenalty = 0.03
@@ -449,7 +450,7 @@ extension PinyinDecoder {
     }
 
     /// 词在给定左上下文下的逐字 logp（`log P(词 | 上文末两字)`）：词级候选的上下文得分，
-    /// 与整句路径同一套分数口径。参考实现词级排序里的 `transition_log_prob` 在本模型下的替身。
+    /// 与整句路径同一套分数口径——词级排序里的转移分（`log P(词 | 上文)`）就是它。
     func wordLogp(context: String, text: String) -> Double {
         var prev2 = NgramModel.bos
         var prev1 = NgramModel.bos
@@ -465,13 +466,6 @@ extension PinyinDecoder {
             prev1 = scalar
         }
         return total
-    }
-
-    /// 词的上下文无关先验（从 BOS 走一遍逐字链）。
-    func wordPrior(text: String) -> Double {
-        let scalars = scalars(of: text)
-        return transition(prev2: NgramModel.bos, prev1: NgramModel.bos,
-                          scalars: scalars, tail: tailScore(of: scalars))
     }
 
     /// 词库是否收录某个音节序列（纠错比分用：纠正后的拼音至少得凑出一个词）。

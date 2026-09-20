@@ -175,6 +175,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
+        // 已下线的「码表拼音混合」方案：老配置先归到「码表」，再让任何逻辑读 codeMode
+        migrateRemovedMixedCodeMode()
         if !commandHandler() {
             return
         }
@@ -190,7 +192,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // 拼音方案锁定项归一（覆盖老版本升级残留的自由配置）
         enforcePinyinInputModeDefaults()
-        // 拼音方案在用：就把音节索引先载好（约 180ms），别让第一次敲字付这笔钱
+        // 拼音方案在用：就把音节索引先载好（约 1.9s，后台跑），别让第一次敲字付这笔钱
         if Defaults[.codeMode] == .pinyin {
             PinyinEngineCenter.shared.prepareIfNeeded()
         }

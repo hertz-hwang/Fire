@@ -3,10 +3,9 @@
 //  Fire
 //
 //  拼音查询管线：敲的键 → 切分 →（不像话则纠错）→ 每个音节位置的多种写法 →
-//  词级候选 + 整句候选 → 排序。参考实现 `engine/query/mod.rs::query_phonetic` 与
-//  `ranking`（7 级排序键）的端口，双拼在前置一步 `ShuangpinScheme.decode` 后与全拼同路。
+//  词级候选 + 整句候选 → 排序。双拼在前置一步 `ShuangpinScheme.decode` 后与全拼同路。
 //
-//  排序规则照参考实现（越小越靠前）：
+//  排序规则：7 级排序键，越小越靠前：
 //  1. 音节数与输入完全一致的词优先（`kaifa` → 开发 排在 开发者 前）
 //  2. 覆盖输入字母多者优先（`kaif` → 开发者 排在 开 前）
 //  3. 切分里非末尾的简拼音节少者优先（`kaifa` 按 `kai fa` 读的 开放 排在按 `kai f a` 读的 开放啊 前）
@@ -108,10 +107,10 @@ final class PinyinEngine {
     /// 词级候选的排序与截断上限。
     static let maxCandidates = 60
 
-    /// 组字区最多吸收多少个键：引擎每键整段重解，开销随音节数涨，
-    /// 不封顶时长串能把主线程拖住。40 键 ≈ 20 个音节（双拼 20 个词），
-    /// 比参考实现 `correction::MAX_LETTERS`（24）宽一倍，正常句子碰不到。
-    static let maxRawKeys = 40
+    /// 组字区最多吸收多少个键：引擎每键整段重解，开销随音节数涨，必须封顶。
+    /// 256 键与形码整句的手动上限同源（`SentenceConfig.manualMaxRawLength`）——
+    /// 全拼约 128 个音节、双拼约 128 个词，正常句子碰不到，只兜住「一直敲不停」。
+    static let maxRawKeys = 256
 
     /// 当前方案是否用到 `;` 键（微软 / 搜狗类的 `ing`）：用到时 `;` 进缓冲区而不是出标点
     var usesSemicolon: Bool { scheme?.usesSemicolon ?? false }
@@ -134,11 +133,11 @@ final class PinyinEngine {
     /// 前缀词最少枚举到第几个音节（从末尾数）。
     static var prefixWordLookbehind = 6
 
-    /// 整句解码试几种切分（参考实现只取最优切分；Fire 的拼音码表没有词频、全靠字级模型分辨，
+    /// 整句解码试几种切分（只取最优切分不够：拼音码表没有词频、全靠字级模型分辨，
     /// 多留几条划分让模型自己挑更划算）。
     static var sentenceSegmentations = 4
 
-    /// 用户选择次数加分系数与封顶（照参考实现 `ranking::WEIGHT_BONUS` / `WEIGHT_CAP`）。
+    /// 用户选择次数加分系数与封顶（取对数加封顶，不封顶时语境压不过它）。
     static let weightBonus = 0.5
     static let weightCap = 20
 
@@ -207,6 +206,7 @@ final class PinyinEngine {
                 scored.append(Scored(text: hit.text, syllables: syllables, exact: hit.exact,
                                      fullLast: fullLast, coverage: segmentation.letters,
                                      abbreviated: abbreviated, weight: weightProvider(hit.text),
+                                     dictRank: hit.rank,
                                      penalty: expanded.penalty(syllables)))
             }
             // 输入的前缀也出候选（`kaifazhe` → 开发、开），否则长句没法逐词上屏。
@@ -228,6 +228,7 @@ final class PinyinEngine {
                                              fullLast: true, coverage: prefixLetters,
                                              abbreviated: prefixAbbreviated,
                                              weight: weightProvider(hit.text),
+                                             dictRank: hit.rank,
                                              penalty: expanded.penalty(syllables)))
                     }
                 }
@@ -414,7 +415,7 @@ final class PinyinEngine {
 // MARK: - 词级排序
 
 private extension PinyinEngine {
-    /// 一条待排序的词库命中（字段与参考实现 `ranking::Scored` 一一对应）。
+    /// 一条待排序的词库命中。
     struct Scored {
         var text: String
         var syllables: [String]
@@ -428,6 +429,9 @@ private extension PinyinEngine {
         var abbreviated: Int
         /// 用户选择过的次数
         var weight: Int
+        /// 词在词库里的位置（表按词频降序写，所以它就是把「常用度」拉成同一条尺子）。
+        /// 预选那一刀靠它：拿词库常用度砍，不拿词长砍。
+        var dictRank: Int
         /// 模糊音 / 敲错变体命中的代价
         var penalty: Double
         /// 用户侧加分（加权词 + 选过的次数），已含在 `score` 里
@@ -440,24 +444,21 @@ private extension PinyinEngine {
 
     /// 排序并按词文本去重（同一个词可能被多种切分命中，保留得分最高的一条），最多留 `limit` 条。
     func rank(_ items: inout [Scored], limit: Int, leftContext: String, input: String) {
-        // 远超上限时先按结构键 + 上下文无关先验线性选出前面一段：参考实现这一步用词库词频，
-        // 我们没有词频，用模型从 BOS 走一遍的一元分顶替。
+        // 远超上限时先按结构键 + 词库常用度选出前面一段（这一步只看词库名次，不跑模型）。
         // 「先砍一刀」是必要的（单字母简拼一键命中上万条），但砍的口径不能是「谁词短谁留」：
         // `xi'an` 直查 666 条，按词长砍会把 西安 这类两字词整片砍掉，语言模型根本看不到它们
         // （实测 西安 连 60 条候选都进不去）。多留一倍给去重留余量。
+        //
+        // 这里早先拿「模型从 BOS 走一遍的一元分」顶替词频（当时词库没带频率）：
+        // 代价是每条候选都要跑一遍语言模型，四十万条词库下一次查询命中上万条，
+        // 逐键模拟 p99 从 28ms 顶到 300ms。换回词库名次后只比整数，这条尾巴直接消失。
         if items.count > limit * 4 {
-            var cache: [String: Double] = [:]
-            cache.reserveCapacity(items.count)
-            func scoreOf(_ text: String) -> Double {
-                if let hit = cache[text] { return hit }
-                let value = decoder.wordPrior(text: text)
-                cache[text] = value
-                return value
-            }
             let ordered: [Scored] = items.sorted { lhs, rhs in
-                lhs.preselectBetter(than: rhs, prior: scoreOf)
+                lhs.preselectBetter(than: rhs)
             }
-            items = Array(ordered.prefix(limit * 4))
+            // 预选这一刀同样要给短覆盖候选留位：词库大了以后，`kaif` 光「盖满四键」
+            // 的词就能干到几百条，预选阶段就把 开 整档切掉，后面的排序再留位也来不及
+            items = Self.truncate(ordered, limit: limit * 4)
         }
         for index in items.indices {
             let choice = choiceProvider(String(input.prefix(items[index].coverage)), items[index].text)
@@ -472,7 +473,41 @@ private extension PinyinEngine {
         items.sort { lhs, rhs in lhs.sortBetter(than: rhs) }
         var seen = Set<String>()
         items = items.filter { seen.insert($0.text).inserted }
-        if items.count > limit { items = Array(items.prefix(limit)) }
+        if items.count > limit { items = Self.truncate(items, limit: limit) }
+    }
+
+    /// 截到 `limit` 条，但给「只覆盖输入前缀」的候选留一小截尾巴。
+    ///
+    /// 排序第 2 键是「覆盖字母多者优先」：词库一大，把当前几个键整个盖住的词就能把
+    /// 候选栏占满——`kaif` 在四十万条词库下有 60+ 个两音节词，「开」这种只吃掉 `kai`、
+    /// 等用户继续打（kai fa…）或直接选字的候选一条都进不来。八万条的老词库侥幸没撞线，
+    /// 换大词库必撞。所以尾部先给短覆盖档留位（按覆盖长度降序、每档几条），
+    /// 剩下的名额再按分数给整覆盖候选；留的是尾巴，首页次序不动。
+    static func truncate(_ items: [Scored], limit: Int) -> [Scored] {
+        guard items.count > limit else { return items }
+        let widest = items.map(\.coverage).max() ?? 0
+        // 尾巴配额与每档上限随总名额缩放：预选阶段（几百个名额）留得住一整档，
+        // 出候选阶段（60 个名额）只占掉尾页几行
+        let reserved = min(max(3, limit / 8), max(1, limit / 4))
+        let perCoverage = max(3, limit / 12)
+        var tail: [Scored] = []
+        var counts = [Int: Int]()
+        for item in items where item.coverage < widest {
+            if tail.count >= reserved { break }
+            if (counts[item.coverage] ?? 0) >= perCoverage { continue }
+            counts[item.coverage, default: 0] += 1
+            tail.append(item)
+        }
+        let reservedTexts = Set(tail.map(\.text))
+        var kept: [Scored] = []
+        kept.reserveCapacity(limit)
+        for item in items {
+            if kept.count >= limit - tail.count { break }
+            if reservedTexts.contains(item.text) { continue }
+            kept.append(item)
+        }
+        kept.append(contentsOf: tail)
+        return kept
     }
 
     /// 上下文得分：字级 n-gram 给 `log P(词 | 上文)`。
@@ -483,16 +518,14 @@ private extension PinyinEngine {
 }
 
 private extension PinyinEngine.Scored {
-    /// 预选键（不拿文本做平手项）：精确 > 覆盖多 > 简拼少 > 末音节完整 > 用户选过 > 先验高 > 原样 > 词短
-    func preselectBetter(than other: PinyinEngine.Scored, prior: (String) -> Double) -> Bool {
+    /// 预选键（不拿文本做平手项）：精确 > 覆盖多 > 简拼少 > 末音节完整 > 用户选过 > 词库常用 > 原样 > 词短
+    func preselectBetter(than other: PinyinEngine.Scored) -> Bool {
         if exact != other.exact { return exact }
         if coverage != other.coverage { return coverage > other.coverage }
         if abbreviated != other.abbreviated { return abbreviated < other.abbreviated }
         if fullLast != other.fullLast { return fullLast }
         if weight != other.weight { return weight > other.weight }
-        let lhsPrior = prior(text)
-        let rhsPrior = prior(other.text)
-        if lhsPrior != rhsPrior { return lhsPrior > rhsPrior }
+        if dictRank != other.dictRank { return dictRank < other.dictRank }
         if altered != other.altered { return !altered }
         return text.count < other.text.count
     }

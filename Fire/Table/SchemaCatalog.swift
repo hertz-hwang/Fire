@@ -9,6 +9,9 @@
 //  码表统一格式：前三行 # 元数据注释，其后每行「候选\t编码」
 //  （见 scripts/normalize_schemas.py）。
 //
+//  `.hdict` 私有词库容器（见 `HDict`）不在扫描范围内：它是二进制头，没有 # 元数据
+//  行可读，也不进「码表」下拉——拼音词库在「词库」面板单独一项，走 `pyTablePath`。
+//
 
 import Foundation
 import Defaults
@@ -198,6 +201,15 @@ enum SchemaCatalog {
             }
         }
         migrate(.wbTablePath, fallbackName: "tiger_table.txt")
-        migrate(.pyTablePath, fallbackName: "py_table.txt")
+        // 拼音词库换代：旧版内置明文表 py_table.txt 已由 `.hdict` 容器 py.hdict 接替。
+        // 只动仍指向 bundle 里那份旧文件的老用户，用户自己选的本地词库不碰。
+        let pyPath = Defaults[.pyTablePath]
+        let newBuiltinPy = schemasDirectory.appending("/py.hdict")
+        if (pyPath as NSString).lastPathComponent == "py_table.txt",
+           (pyPath as NSString).deletingLastPathComponent == schemasDirectory,
+           FileManager.default.fileExists(atPath: newBuiltinPy) {
+            Defaults[.pyTablePath] = newBuiltinPy
+        }
+        migrate(.pyTablePath, fallbackName: "py.hdict")
     }
 }

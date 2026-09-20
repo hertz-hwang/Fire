@@ -8,8 +8,9 @@
 //  拼音方案的运行时装配：把偏好设置翻成 `PinyinEngine` 的配置，
 //  并在码表 / 模型变化时重建音节索引。控制器只问「引擎好了吗、查一下」。
 //
-//  索引载入约 180ms（八万条码 → 逐条码切音节 + 排序），不能放在按键路径上：
-//  首次用到时在后台队列跑，`ready` 之前控制器走原有词库分支兜底，不会打不出字。
+//  索引载入约 1.9s（47.5 万条 `.hdict` 词库 → 逐条码切音节 + 排序；八万条的老明文表
+//  是 180ms），不能放在按键路径上：首次用到时在后台队列跑，`ready` 之前控制器走
+//  原有词库分支兜底，不会打不出字。
 //
 
 import Foundation
@@ -152,7 +153,7 @@ final class PinyinEngineCenter {
 
     /// 加权词 → 「选过的次数」当量。词库权重 1000 是缺省（等于没加权，不给分），
     /// 往上按每 100 记一次，封顶交给引擎自己的对数 + 封顶（最多约 1.5 分），
-    /// 让语境仍能压过它——参考实现的 weightBonus 就是这个道理。
+    /// 让语境仍能压过它——选词次数只给对数加分就是这个道理。
     private func refreshUserWeights() {
         var next: [String: Int] = [:]
         for entry in DictManager.shared.getUserSupplementEntries() {
@@ -170,7 +171,7 @@ final class PinyinEngineCenter {
         // 是那条分支唯一会拉模型的地方——不补这一步，拼音的逐字分全是 0，
         // 整句与词级排序直接退化成「谁排在码表前面算谁赢」
         NgramModel.shared.ensureLoaded()
-        // 码表方案 / 混合方案不载拼音索引（启动时白付 180ms 没意义）；
+        // 码表方案不载拼音索引（启动时白付近 2 秒没意义）；
         // 切到拼音方案时控制器查询前会再调一次
         guard Defaults[.codeMode] == .pinyin else { return }
         let path = Defaults[.pyTablePath]

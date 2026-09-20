@@ -4,8 +4,8 @@
 //
 //  双拼键位表：键 → 声母、键 → 韵母（可多个，按优先级）、零声母音节 → 两键写法。
 //
-//  内置五套方案逐条照搬参考实现 `ref-core/src/shuangpin/table.rs`（按 Rime 的
-//  `double_pinyin*.schema.yaml` 核对，搜狗来自 rime-ice 整理）。与参考实现有两点不同：
+//  内置五套方案按公开键位表逐条录入（Rime 的 `double_pinyin*.schema.yaml`，
+//  搜狗来自 rime-ice 整理）。两处关键设计：
 //
 //  * 表是**运行时值**而非编译期常量——用户能在设置面板里拖拽改键，
 //    自定义方案与内置方案走完全相同的解码路径。
@@ -112,7 +112,7 @@ struct ShuangpinKeyTable: Codable, Hashable {
     var boundFinals: [String] { finals.flatMap(\.finals) }
 }
 
-/// 五套内置方案的键位表（照参考实现表逐键核对）。
+/// 五套内置方案的键位表（逐键与公开键位表核对）。
 enum ShuangpinTables {
     /// 小鹤双拼。
     static let xiaohe = ShuangpinKeyTable.build(

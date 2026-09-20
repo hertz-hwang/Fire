@@ -3,7 +3,7 @@
 //  Fire
 //
 //  双拼解码：两键一音节，第一键声母、第二键韵母，零声母另有约定。
-//  参考实现 `ref-core/src/shuangpin/{scheme,decoded,unit}.rs` 的端口。
+//  键位表是运行时值（见 `ShuangpinKeyTable`），本文件只按表把键翻成拼音。
 //
 //  解码只做一件事：把敲的键翻成全拼（音节之间用 `'` 连上，切分因此没有歧义），
 //  之后的切分、查词、整句、联想全部复用全拼的那一套；壳与词库都不知道双拼的存在。
@@ -221,10 +221,10 @@ struct ShuangpinScheme: Hashable {
     /// 按当前键位重算零声母两键写法，与既有写法**合并**（不丢 o 前缀式的方案）。
     ///
     /// 自定义方案最容易漏的就是这一栏：漏了之后 `a` / `ai` / `ang` 全打不出来。规则是
-    /// 参考实现五套表反推出来的两条：
+    /// 从五套内置表反推出来的两条：
     /// * 原样两字母（`ai` 就敲 `ai`）——单字母音节双写（`a` → `aa`）；
     /// * 首字母 + 该韵母所在的键（`ang` → `a` + 绑着 `ang` 的 `h` = `ah`）。
-    /// 拿小鹤 / 自然码的韵母键位跑一遍，推出的写法与参考实现表里手写的逐条一致。
+    /// 拿小鹤 / 自然码的韵母键位跑一遍，推出的写法与内置表里手写的逐条一致。
     func derivingZeroInitials() -> [ShuangpinZeroSyllable] {
         var result = table.zeroInitials
         for syllable in PinyinSyllables.zeroInitialSyllables {

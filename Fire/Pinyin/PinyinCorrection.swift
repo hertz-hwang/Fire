@@ -2,7 +2,7 @@
 //  PinyinCorrection.swift
 //  Fire
 //
-//  拼写纠错。参考实现 `ref-core/src/correction/*` 的端口，两条互补的路：
+//  拼写纠错，两条互补的路：
 //
 //  1. **整段一处编辑**（`PinyinCorrection.candidates`）：用户敲的拼音「不像话」时
 //     （切不干净，或非末尾有简拼 / 残缺音节），试一处编辑（相邻换位、换一个字母、
@@ -153,7 +153,7 @@ enum PinyinTypoKind: Int, Hashable, CaseIterable {
     case missing
 }
 
-/// 敲错纠正的代价（log 概率的扣分）。缺省值照搬参考实现 `TypoCosts::DEFAULT`。
+/// 敲错纠正的代价（log 概率的扣分）。缺省值按「一处敲错本就少见」定的经验值。
 struct PinyinTypoCosts: Hashable {
     var transpose = 5.0
     var substitute = 5.0

@@ -163,8 +163,8 @@ struct ShuangpinKeyEditor {
     }
 
     /// 有歧义的键位组合：同一对键既能当零声母写法、又能读成「声母 + 韵母」，
-    /// 或者一对键对应多个零声母音节。参考实现对内置方案有同样的单测
-    /// （`every_key_pair_is_unambiguous`），自定义方案更需要在保存前看见它。
+    /// 或者一对键对应多个零声母音节。这类组合真敲起来会二义，
+    /// 自定义方案尤其需要在保存前看见它。
     func ambiguousKeyPairs() -> [(keys: String, readings: [String])] {
         var result: [(String, [String])] = []
         for first in keys {
@@ -180,7 +180,7 @@ struct ShuangpinKeyEditor {
     }
 
     /// 一键多音节风险：某个两键组合既能解成零声母写法、又能拼成合法音节。
-    /// （内置方案里也普遍存在，参考实现的做法是零声母优先，不算错误，所以只报不拦）
+    /// （内置方案里也普遍存在，这里零声母优先，不算错误，所以只报不拦）
     func collidingKeyPairs() -> [(keys: String, readings: [String])] {
         var result: [(String, [String])] = []
         for first in keys {

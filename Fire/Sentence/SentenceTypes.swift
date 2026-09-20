@@ -74,7 +74,7 @@ enum SentenceConfig {
     static let logpCacheLimit = 32768
     static let observedCacheLimit = 32768
 
-    /// 拼音模式码长上限（py_table 有 20 键长条目，全放进去分支太宽）
+    /// 拼音模式码长上限（拼音词库有 20 键长条目，全放进去分支太宽）
     static let pinyinMaxCodeLength = 12
     /// 拼音模式每码参与组句的边数上限（建表时截断）。
     /// 拼音码表是自然重码结构：`yi` 有 577 个单字、`shijie` 命中 756 条边，

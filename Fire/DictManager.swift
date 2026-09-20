@@ -60,18 +60,20 @@ class DictManager {
         database = nil
     }
 
+    /// 编码方案的候选类型过滤：码表只取形码行，拼音只取全拼行（'user' 两边都算）
+    private func typeFilter(_ mode: CodeMode) -> String {
+        mode == .wubi ? "and type in ('wb', 'user')" : "and type in ('py', 'user')"
+    }
+
     private func getStatementSql() -> String {
-        let codeMode = Defaults[.codeMode]
         // 比显示的候选词数量多查一个，以此判断有没有下一页；limit 通过 :limit 参数传入
         let sql = """
             select
-                \(codeMode == .wubiPinyin ? "max(wbcode)" : "min(wbcode)"),
+                min(wbcode),
                 text,
                 type, min(query) as query
             from wb_py_dict
-            where query glob :queryLike \(
-                codeMode == .wubi ? "and type in ('wb', 'user')"
-                                : codeMode == .pinyin ? "and type in ('py', 'user')" : "")
+            where query glob :queryLike \(typeFilter(Defaults[.codeMode]))
             group by text
             order by query, id
             limit :offset, :limit
@@ -350,18 +352,15 @@ class DictManager {
         candidatesCountCache.removeAll()
     }
 
-    /// 常规码表候选总数：与 getStatementSql 同一过滤条件（query glob + codeMode 类型过滤）按 text 去重
+    /// 常规码表候选总数：与 getStatementSql 同一过滤条件（query glob + 编码方案类型过滤）按 text 去重
     func getCandidatesCount(query: String) -> Int {
         if query.isEmpty { return 0 }
         let key = "c\(Defaults[.codeMode].rawValue)|\(query)"
         return cachedCandidatesCount(key: key, sql: {
-            let codeMode = Defaults[.codeMode]
             return """
                 select count(*) from (
                     select text from wb_py_dict
-                    where query glob :queryLike \(
-                        codeMode == .wubi ? "and type in ('wb', 'user')"
-                        : codeMode == .pinyin ? "and type in ('py', 'user')" : "")
+                    where query glob :queryLike \(typeFilter(Defaults[.codeMode]))
                     group by text
                 )
                 """

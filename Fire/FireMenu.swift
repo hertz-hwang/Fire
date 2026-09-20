@@ -242,18 +242,17 @@ extension FireInputController {
     private func buildQuickSettingItems() -> [NSMenuItem] {
         var items: [NSMenuItem] = []
 
-        let codeMode = Defaults[.codeMode]
-        let isPinyin = codeMode == .pinyin
+        let isPinyin = Defaults[.codeMode] == .pinyin
         let sentenceOn = Defaults[.enableSentenceMode]
 
         // 码表（仅码表方案；选项来自 Resources/schemas，扁平化保证点击可靠）
-        if codeMode == .wubi {
+        if !isPinyin {
             items.append(contentsOf: buildTableItems())
         }
 
         // 整句：拼音方案强制开（锁定）；无配套整句码表（五笔86/98等）不可开
         let sentenceEnabled = !isPinyin
-            && (codeMode != .wubi || SchemaCatalog.supportsSentence(selectedTablePath: Defaults[.wbTablePath]))
+            && SchemaCatalog.supportsSentence(selectedTablePath: Defaults[.wbTablePath])
         let sentenceHelp = sentenceEnabled
             ? nil
             : (isPinyin ? "拼音方案强制整句" : "所选码表无配套整句码表")

@@ -3,21 +3,24 @@
 //  Fire
 //
 //  拼音词库的**音节索引**：把「候选\t全拼」码表按音节序列重新组织，支持
-//  「每个位置可以是完整音节、前缀或声母（简拼）」的查词。参考实现 `ref-dictionary`
-//  （`Dictionary::narrow` / `scan_range` / `prefix_range`）的端口。
+//  「每个位置可以是完整音节、前缀或声母（简拼）」的查词：键数组上二分收窄，
+//  命中键下的词目槽位整段进出。
+//
+//  词库来源可以是 `.hdict` 私有容器（内置那份，带词频列）或明文 txt，读法见 `HDict`；
+//  行格式 `候选\t连写全拼[\t词频]`，词频降序写盘时「同码重码的常用次序」就是 `ordinal`。
 //
 //  为什么不能直接用现有的 SQLite 码表查询：那是「编码字符串 glob 前缀」的口径，
 //  拼音要的是「按音节逐位匹配」——`kf`（简拼）要命中 开发(kai fa)、`zi` 要顺带命中
 //  zhi 系的词，字符串前缀做不到。
 //
-//  与参考实现的两处必要差别：
-//  * 参考实现词库自带空格分好的音节列，Fire 的拼音码表只有连写全拼（`开发\tkaifa`），
+//  两处口径要单独交代：
+//  * 拼音码表只有连写全拼（`开发\tkaifa`），没有空格分好的音节列，
 //    建索引时要自己切分；`xian` 这种能切成 `xian` / `xi an` 的码**每种切法都进索引**
 //    （西安 / 先 都要各自的敲法查到），同键同词去重。
 //  * 去重只按 (词, 码)：多音字（长 chang / zhang）的第二读法必须留着。
 //
-//  存储形状照参考实现：`keys` 是**去重后**的音节序列（字典序），每个键指向 `slots` 里
-//  连续的一段词目（同键内按码表 rank 升序 = 常用在前）。二分收窄因此只跑在键数组上，
+//  存储形状：`keys` 是**去重后**的音节序列（字典序），每个键指向 `slots` 里
+//  连续的一段词目（同键内按词频降序 = 常用在前，没词频时退回文件序）。二分收窄因此只跑在键数组上，
 //  一个键的一堆同音词整体进出命中列表，不会像「一行一词」那样重复 N 次。
 //
 
@@ -78,40 +81,59 @@ final class PinyinLexicon {
 
     // MARK: - 载入
 
-    /// 载入「候选\t编码」格式的拼音码表（前三行 # 元数据，# 注释与空行跳过）。
+    /// 载入拼音码表。`.hdict` 私有容器（解压后也是行流）与明文 txt 同一套解析：
+    /// `候选\t连写全拼[\t词频]`，`#` 注释与空行跳过，文件序 = rank。
+    ///
+    /// 词频只决定**同码重码的先后**（`ordinal` → 解码器的轻罚与格子截断都按它），
+    /// 表里没带词频时恒为 0，比较退回文件序，行为与老拼音码表一致。
     @discardableResult
     func load(path: String) -> Bool {
         let started = Date()
-        guard let data = FileManager.default.contents(atPath: path),
-              let text = String(data: data, encoding: .utf8) else { return false }
-        var pairs: [(text: String, code: String)] = []
-        pairs.reserveCapacity(96_000)
+        guard let text = HDict.tableText(path: path) else { return false }
+        let head = HDict.header(at: path)
+        // 容器声明「行已规范化且 (词,码) 已去重」时，逐行 trim 与去重集都能省：
+        // 几十万条词条下这两段是载入开销的大头之一。手写明文表没这个标记，照旧逐行校验。
+        let canonical = head?.hasCanonicalRows ?? false
+        var pairs: [(text: String, code: String, weight: Int)] = []
+        pairs.reserveCapacity(head.map { $0.entryCount + 1 } ?? 96_000)
         var seen = Set<String>()
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
             if line.hasPrefix("#") { continue }
-            let parts = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
-            guard parts.count == 2 else { continue }
-            let word = parts[0].trimmingCharacters(in: .whitespaces)
-            let code = parts[1].trimmingCharacters(in: .whitespaces)
+            // maxSplits 2：第三列（词频）单独转数，不让它混进编码里当成字母比
+            let parts = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
+            guard parts.count >= 2 else { continue }
+            let word = canonical ? String(parts[0]) : parts[0].trimmingCharacters(in: .whitespaces)
+            let code = canonical ? String(parts[1]) : parts[1].trimmingCharacters(in: .whitespaces)
+            let weightField = parts.count > 2
+                ? (canonical ? parts[2] : parts[2].trimmingCharacters(in: .whitespaces)[...]) : ""
+            let weight = Int(weightField) ?? 0
             guard !word.isEmpty, !code.isEmpty, code.count <= 32 else { continue }
             guard code.allSatisfy({ $0 >= "a" && $0 <= "z" }) else { continue }
-            let identity = word + "\u{1}" + code
-            if !seen.insert(identity).inserted { continue }
-            pairs.append((word, code))
+            if !canonical {
+                let identity = word + "\u{1}" + code
+                if !seen.insert(identity).inserted { continue }
+            }
+            pairs.append((word, code, weight))
         }
-        // 摊平：(键, 词, 码表位置)
-        var flat: [(key: String, text: String, rank: Int)] = []
+        // 去重集只是建表期的临时内存，百万级词条下先腾掉再摊平，峰值小一截
+        seen.removeAll(keepingCapacity: false)
+        let parsedEntries = pairs.count
+        // 摊平：(键, 词, 码表位置, 词频)
+        var flat: [(key: String, text: String, rank: Int, weight: Int)] = []
         flat.reserveCapacity(pairs.count)
         var syllableCache: [String: [String]?] = [:]
         syllableCache.reserveCapacity(pairs.count / 2)
         for (index, pair) in pairs.enumerated() where index < Int(Int32.max) {
             guard let syllabifications = syllabify(pair.code, cache: &syllableCache) else { continue }
             for key in syllabifications {
-                flat.append((key, pair.text, index + 1))
+                flat.append((key, pair.text, index + 1, pair.weight))
             }
         }
+        pairs.removeAll(keepingCapacity: false)
         flat.sort { lhs, rhs in
             if lhs.key != rhs.key { return lhs.key < rhs.key }
+            // 词频降序 = 常用在前；没带词频的表恒等，退回原来的文件序
+            if lhs.weight != rhs.weight { return lhs.weight > rhs.weight }
             if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
             return lhs.text < rhs.text
         }
@@ -128,7 +150,7 @@ final class PinyinLexicon {
             newStart.append(texts.count)
             var seenText = Set<String>()
             while index < flat.count, flat[index].key == key {
-                // 同键同词只留 rank 最小者（排过序，第一个就是）
+                // 同键同词只留第一条（排过序：词频降序 → 文件序，第一条就是最常用那条）
                 if seenText.insert(flat[index].text).inserted {
                     texts.append(flat[index].text)
                     ranks.append(flat[index].rank)
@@ -143,10 +165,15 @@ final class PinyinLexicon {
         slotTexts = texts
         slotRanks = ranks
         loadedPath = path
-        entryCount = pairs.count
+        entryCount = parsedEntries
         generation += 1
-        pinyinLog("拼音词库载入 \(path)：词条 \(pairs.count) / 索引键 \(keys.count) / 词目 \(texts.count)，"
+        pinyinLog("拼音词库载入 \(path)：词条 \(parsedEntries) / 索引键 \(keys.count) / 词目 \(texts.count)，"
             + "\(Int(Date().timeIntervalSince(started) * 1000))ms")
+        // 容器头部写了词条数：解析结果对不上就是表被改坏 / 版本不匹配，当场喊出来
+        if let head = head, head.entryCount != parsedEntries {
+            pinyinLog("⚠️ \((path as NSString).lastPathComponent) 容器声明 \(head.entryCount) 条，"
+                + "实际解析出 \(parsedEntries) 条（重复行或不合格行？）")
+        }
         return true
     }
 

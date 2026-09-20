@@ -3,8 +3,7 @@
 //  Fire
 //
 //  普通话音节表与查表：全拼切分、双拼拼写合法性的唯一事实来源。
-//  等价于参考实现 `ref-core/src/parser/{syllable,trie}.rs`——音节表逐条照搬，
-//  查表口径一致（`is_syllable` / `is_syllable_prefix` / `initial_lengths`）。
+//  音节表逐条录入，查表只认三种问法：是否完整音节、是否音节前缀、开头能当声母的长度。
 //
 
 import Foundation
@@ -136,9 +135,8 @@ enum PinyinSyllables {
     }
 
     /// `rest` 开头能当声母的长度：`zh` 开头返回 `[2, 1]`（`zh` 与 `z` 都可能），
-    /// `k` 返回 `[1]`，元音开头为空。**按 `initials` 表序返回**，与参考实现
-    /// `initial_lengths` 的迭代序一致——切分 DP 里的插入顺序靠它对齐，
-    /// 同分切分的先后（候选栏顺序）不能抖。
+    /// `k` 返回 `[1]`，元音开头为空。**按 `initials` 表序返回**——切分 DP 里的
+    /// 插入顺序靠它对齐，同分切分的先后（候选栏顺序）不能抖。
     static func initialLengths(_ bytes: [UInt8], _ from: Int) -> [Int] {
         var lengths: [Int] = []
         for initial in initials {

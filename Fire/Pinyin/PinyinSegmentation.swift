@@ -3,7 +3,7 @@
 //  Fire
 //
 //  拼音切分：把无分隔的拼音串切成音节序列。
-//  参考实现 `ref-core/src/parser/mod.rs` 的端口，DP、排序键、上限逐项对齐：
+//  切分口径（DP 枚举、排序键、条数上限）一次定死，改动会连带拖候选栏顺序：
 //  支持全拼、简拼（声母缩写 `kf` → `k f`）与两者混用（`kaif`、`kfa`），
 //  输入允许用 `'` 强制分隔（`xi'an`）；末尾允许一个未打完的音节前缀（`zho`）。
 //  每种切分里每个音节标记是否完整——查词时完整音节精确匹配、不完整音节按前缀匹配。
@@ -56,7 +56,7 @@ struct PinyinSegmentation: Hashable {
     }
 }
 
-/// 切分输入不合法的种类（与参考实现 `ParseError` 同口径）。
+/// 切分输入不合法的种类。
 enum PinyinParseError: Error, Equatable {
     case empty
     case invalidCharacter(position: Int, character: Character)
@@ -88,7 +88,7 @@ enum PinyinParser {
         var index = 0
         var sawChunk = false
         while index < bytes.count {
-            // 跳过连续分隔符（空段直接忽略，与参考实现 `filter(!c.is_empty())` 一致）
+            // 跳过连续分隔符（空段直接忽略）
             if bytes[index] == 39 { index += 1; continue }
             var end = index
             while end < bytes.count, bytes[end] != 39 { end += 1 }
@@ -153,7 +153,7 @@ enum PinyinParser {
         var result: [PinyinSegmentation] = []
         result.reserveCapacity(min(sorted.count, maxSegmentations))
         for item in sorted {
-            // 与参考实现 `dedup` 一致：只去掉相邻重复（同键不同值的切分不折叠）
+            // 只去掉相邻重复（同键不同值的切分不折叠）
             if result.last == item.value { continue }
             result.append(item.value)
             if result.count == maxSegmentations { break }
@@ -245,7 +245,7 @@ enum PinyinParser {
 }
 
 private extension PinyinSegmentation {
-    /// 「前面的音节越长越优先」：逐位比长度，长者优先（参考实现 `Vec<Reverse(len)>` 的字典序）
+    /// 「前面的音节越长越优先」：逐位比长度，长者优先（按位字典序，不是比总长）
     func sortKeyIsBetter(than other: PinyinSegmentation) -> Bool {
         let lhs = syllables.map { $0.text.count }
         let rhs = other.syllables.map { $0.text.count }

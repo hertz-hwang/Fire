@@ -18,10 +18,37 @@ struct ThesaurusPane: View {
 
     @State private var modelLoaded: Bool = false
     @State private var modelStatus: String = "未加载"
+    /// 拼音词库是 `.hdict` 容器时的摘要（词条数 / 压缩比），明文表留空
+    @State private var pyDictSummary: String = ""
 
     private let availableFontFamilies = NSFontManager.shared.availableFontFamilies
 
-    private func selectFile() -> String? {
+    /// 拼音词库选择：明文码表与 `.hdict` 私有容器都可挑（未注册的 .hdict 归 public.data）。
+    /// 选完先验一遍再写设置：指到一个读不了的词库，拼音模式会整块哑掉，
+    /// 当场弹回比「候选栏没词」好定位得多。
+    private func selectDictFile() -> String? {
+        guard let path = selectFile(allowData: true) else { return nil }
+        if isReadableDictTable(path) { return path }
+        let alert = NSAlert()
+        alert.messageText = "读不出码表"
+        alert.informativeText = "\((path as NSString).lastPathComponent) 不是可读的明文码表，也不是合法的 .hdict 容器。"
+        alert.alertStyle = .warning
+        alert.runModal()
+        return nil
+    }
+
+    /// 能读就算过：`.hdict` 看容器头，其余按 UTF-8 文本读，要求至少有一行「候选\t编码」
+    private func isReadableDictTable(_ path: String) -> Bool {
+        if HDict.isHDict(path: path) { return HDict.header(at: path) != nil }
+        return HDict.tableText(path: path)?.contains("\t") == true
+    }
+
+    private func refreshPyDictSummary() {
+        let path = Defaults[.pyTablePath]
+        pyDictSummary = HDict.isHDict(path: path) ? HDict.describe(at: path) : ""
+    }
+
+    private func selectFile(allowData: Bool = false) -> String? {
         let openPanel = NSOpenPanel()
         openPanel.directoryURL = Bundle.main.resourceURL
         openPanel.prompt = "选择词库文件"
@@ -29,13 +56,13 @@ struct ThesaurusPane: View {
         openPanel.canChooseDirectories = false
         openPanel.canCreateDirectories = false
         openPanel.canChooseFiles = true
-        openPanel.allowedContentTypes = [.text]
-        let result = openPanel.runModal()
-        if result == NSApplication.ModalResponse.OK {
+        // .hdict 没进 UTI 注册，只给 .text 会在面板里被灰掉选不中
+        openPanel.allowedContentTypes = allowData ? [.text, .data] : [.text]
+        let result = NSApplication.ModalResponse.OK == openPanel.runModal()
+        if result {
             let selectedPath = openPanel.url!.path
             print(selectedPath)
             return selectedPath
-
         }
         return nil
     }
@@ -96,9 +123,17 @@ struct ThesaurusPane: View {
         Form {
             Section {
                 PreferencePickerRow(title: "拼音词库") {
-                    pathBadge(pyTablePath) {
-                        if let path = selectFile() {
-                            Defaults[.pyTablePath] = path
+                    VStack(alignment: .trailing, spacing: 2) {
+                        pathBadge(pyTablePath) {
+                            if let path = selectDictFile() {
+                                Defaults[.pyTablePath] = path
+                                refreshPyDictSummary()
+                            }
+                        }
+                        if !pyDictSummary.isEmpty {
+                            Text(pyDictSummary)
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
                         }
                     }
                 }
@@ -154,6 +189,7 @@ struct ThesaurusPane: View {
         .formStyle(.grouped)
         .onAppear {
             refreshModelStatus()
+            refreshPyDictSummary()
         }
     }
 }
