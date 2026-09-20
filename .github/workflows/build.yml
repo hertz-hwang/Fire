@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "版本号 (如 v0.28.4)"
+        description: "版本号 (如 v0.28.5)"
         required: true
         type: string
       release_notes:
