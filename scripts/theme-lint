@@ -1,0 +1,737 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+theme-lint · Fire 候选窗主题 JSON 的静态检查 + 预览工具。
+
+用法：
+  ./scripts/theme-lint themes/celadon.theme.json          # 检查单个主题
+  ./scripts/theme-lint themes/*.theme.json                # 批量检查
+  ./scripts/theme-lint --require-all --preview /tmp/p themes/celadon.theme.json
+  ./scripts/theme-lint --model                            # 打印从 Swift 源码解析出的参数模型
+
+检查项（全部以源码为唯一事实源，运行时解析，不写死字段表）：
+  1. 结构：JSONC 注释剥离（与 `Fire/Theme/ThemeConfig.swift` 的 stripJSONComments 同算法）
+     → 顶层 id/name/author 非空、schemaVersion、light/dark 两套；
+  2. 字段：与 `ApperanceThemeConfig` 的 `let` 声明逐一对齐 —— 未知字段（拼错）报 error，
+     缺必填字段报 error，缺可选字段（渲染时回落默认值）报 warning，`--require-all` 升级为 error；
+  3. 取值：数值区间从 `ThemeEditorView.swift` 的 `numberRow(..., range: a...b)` 现场抓取
+     （超出区间 = 在设置面板里会被滑块夹掉，导出后主题"看起来变了"）；hex 支持 3/4/6/8 位；
+  4. 可读性：正文/序号/提示码/编码行/打分/页码各自对"真实落底颜色"（高亮项按 alpha 合成后的
+     胶囊色）算 WCAG 对比度，正文 ≥18pt 自动放宽到 AA-Large 3:1；高亮胶囊与窗口底色、
+     选中正文与未选中正文另算 Lab 色差 ΔE（只靠亮度会误伤彩色高亮），不达标报 warning；
+  5. 冲突：默认扫描 `themes/*.theme.json`，id/name 与其它主题重复报 error（导入会互相覆盖）。
+
+退出码：0 = 通过（可能有 warning）；1 = 有 error（或 --strict 下有 warning）；2 = 用法/环境错误。
+依赖：仅标准库；`--preview` 额外需要 Pillow（`pip3 install pillow`）。
+
+已知局限：
+  - 字段/区间是「解析 Swift 源码」得来的，不执行解码器；权威判定仍是 `Fire/Theme/ThemeConfig.swift`
+    的 `parseThemeConfig`（导入时走它）。本工具的价值是在导入之前把拼错、越界、不可读配色挑出来，
+    并在源码新增参数后自动把这些参数标为「主题未提供」。
+  - `--preview` 是按真实几何（圆角、高亮胶囊向两侧各外溢半个 padding、行高 = 提示码行高 + 2×行留白）
+    的近似重绘，用于肉眼评审配色/留白；字体走本机文件匹配，与 App 的行宽计算、列对齐不逐像素一致。
+
+要跑「权威解码」（真正的 `parseThemeConfig`）而不只是静态检查，拿已构建的 Defaults 模块编一个临时工具：
+在 `Fire/Theme/ThemeConfig.swift` 之外再给一个 `extension Defaults.Keys { themeConfig / importedThemeConfig }`
+的 stub 与一个调 `parseThemeConfig` 的 main，然后：
+
+```bash
+swiftc -target arm64-apple-macos13.0 -I build/DerivedData/Build/Products/Debug \
+  Fire/Theme/ThemeConfig.swift stub.swift main.swift \
+  build/DerivedData/Build/Products/Debug/Defaults.o -o /tmp/themeval && /tmp/themeval themes/celadon.theme.json
+```
+"""
+
+from __future__ import annotations
+
+import argparse
+import difflib
+import glob
+import json
+import math
+import os
+import re
+import sys
+
+# ---------------------------------------------------------------------------
+# JSONC
+# ---------------------------------------------------------------------------
+
+
+def strip_json_comments(src: str) -> str:
+    """逐字符扫描剥离 // 与 /* */ 注释，字符串内的 // 不受影响。
+
+    与 Swift 侧 stripJSONComments 行为一致：块注释里的换行保留，让解码报错行号对齐原文件。
+    """
+    out: list[str] = []
+    i, n = 0, len(src)
+    in_str = escaped = False
+    while i < n:
+        ch = src[i]
+        if in_str:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_str = False
+            i += 1
+            continue
+        if ch == '"':
+            in_str = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "/" and i + 1 < n:
+            if src[i + 1] == "/":
+                i += 2
+                while i < n and src[i] != "\n":
+                    i += 1
+                continue
+            if src[i + 1] == "*":
+                i += 2
+                while i + 1 < n and not (src[i] == "*" and src[i + 1] == "/"):
+                    if src[i] == "\n":
+                        out.append("\n")
+                    i += 1
+                i += 2
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+# ---------------------------------------------------------------------------
+# 从 Swift 源码解析参数模型
+# ---------------------------------------------------------------------------
+
+
+def read(path: str) -> str:
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def struct_body(text: str, name: str) -> str:
+    """取 `struct <name> { ... }` 的花括号体（按深度匹配，跳过字符串/注释里的括号）。"""
+    m = re.search(r"struct\s+%s\b" % re.escape(name), text)
+    if not m:
+        raise SystemExit(f"2: 在源码里找不到 struct {name}")
+    brace = text.index("{", m.end())
+    depth, i = 0, brace
+    in_str = in_line = in_block = False
+    while i < len(text):
+        c = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+        if in_line:
+            if c == "\n":
+                in_line = False
+        elif in_block:
+            if c == "*" and nxt == "/":
+                in_block = False
+                i += 1
+        elif in_str:
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                in_str = False
+        else:
+            if c == "/" and nxt == "/":
+                in_line = True
+                i += 1
+            elif c == "/" and nxt == "*":
+                in_block = True
+                i += 1
+            elif c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[brace + 1 : i]
+        i += 1
+    raise SystemExit(f"2: struct {name} 花括号不匹配")
+
+
+FIELD_RE = re.compile(
+    r"^\s*let\s+(?P<name>\w+)\s*:\s*(?P<type>[\w.]+)(?P<opt>\?)?\s*$", re.M
+)
+
+
+def parse_struct_fields(body: str) -> dict[str, dict]:
+    """只取顶层 `let name: Type` 声明（CodingKeys 用 case、init 里是 let x = ...，都不匹配）。"""
+    fields: dict[str, dict] = {}
+    for m in FIELD_RE.finditer(body):
+        fields[m.group("name")] = {
+            "type": m.group("type"),
+            "optional": bool(m.group("opt")),
+        }
+    return fields
+
+
+RANGE_RE = re.compile(r"value:\s*activeTheme\.(?P<name>\w+),\s*range:\s*(?P<lo>[\d.]+)\.\.\.(?P<hi>[\d.]+)")
+
+
+def parse_editor_ranges(text: str) -> dict[str, tuple[float, float]]:
+    ranges: dict[str, tuple[float, float]] = {}
+    for m in RANGE_RE.finditer(text):
+        ranges[m.group("name")] = (float(m.group("lo")), float(m.group("hi")))
+    return ranges
+
+
+def load_model(repo: str) -> dict:
+    theme_swift = read(os.path.join(repo, "Fire/Theme/ThemeConfig.swift"))
+    editor_swift = read(os.path.join(repo, "Fire/Preferences/ThemeEditorView.swift"))
+    appearance = parse_struct_fields(struct_body(theme_swift, "ApperanceThemeConfig"))
+    top = parse_struct_fields(struct_body(theme_swift, "ThemeConfig"))
+    # 当前结构版本：defaultThemeConfig 里的 `schemaVersion: N`
+    cur = re.search(r"schemaVersion:\s*(\d+)", theme_swift)
+    return {
+        "appearance": appearance,
+        "top": top,
+        "ranges": parse_editor_ranges(editor_swift),
+        "schema": int(cur.group(1)) if cur else 1,
+        "colors": {k for k, v in appearance.items() if v["type"] == "ColorData"},
+        "floats": {k for k, v in appearance.items() if v["type"] == "Float"},
+        "bools": {k for k, v in appearance.items() if v["type"] == "Bool"},
+        "strings": {k for k, v in appearance.items() if v["type"] == "String"},
+    }
+
+
+def find_repo(start: str) -> str:
+    d = os.path.abspath(start)
+    while True:
+        if os.path.isfile(os.path.join(d, "Fire/Theme/ThemeConfig.swift")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            sys.exit("2: 找不到仓库根（需要 Fire/Theme/ThemeConfig.swift），用 --repo 指定")
+        d = parent
+
+
+# ---------------------------------------------------------------------------
+# 颜色
+# ---------------------------------------------------------------------------
+
+HEX_RE = re.compile(r"#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
+
+
+def parse_hex(value: str):
+    """返回 (r,g,b,a) 浮点 0..1；非法则 None（规则与 ColorData.init?(hex:) 一致）。"""
+    if not isinstance(value, str) or not HEX_RE.match(value.strip()):
+        return None
+    s = value.strip().lstrip("#")
+    if len(s) in (3, 4):
+        s = "".join(c * 2 for c in s)
+    r, g, b = (int(s[i : i + 2], 16) for i in (0, 2, 4))
+    a = int(s[6:8], 16) / 255 if len(s) == 8 else 1.0
+    return r / 255, g / 255, b / 255, a
+
+
+def to_255(c):
+    """0..1 浮点颜色 → 0..255；带 alpha 时输出 4 元组（Pillow 当作 RGBA）。"""
+    rgb = tuple(int(round(v * 255)) for v in c[:3])
+    if len(c) > 3:
+        return rgb + (int(round(c[3] * 255)),)
+    return rgb
+
+
+def over(fg, bg):
+    """fg 带 alpha 合成到不透明 bg 上，返回不透明 RGB。"""
+    return tuple(fg[k] * fg[3] + bg[k] * (1 - fg[3]) for k in range(3))
+
+
+def _lin(c):
+    return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def contrast(fg, bg) -> float:
+    l1, l2 = (_lin(fg[0]) * 0.2126 + _lin(fg[1]) * 0.7152 + _lin(fg[2]) * 0.0722,
+              _lin(bg[0]) * 0.2126 + _lin(bg[1]) * 0.7152 + _lin(bg[2]) * 0.0722)
+    hi, lo = max(l1, l2), min(l1, l2)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def to_lab(rgb):
+    """sRGB(0..1) → CIE Lab(D65)，用于判「色相/彩度差异」，对比度只看亮度会误伤彩色高亮。"""
+    lin = [_lin(c) for c in rgb[:3]]
+    r, g, b = lin
+    x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+    y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+    f = [t ** (1 / 3) if t > 0.008856 else 7.787 * t + 16 / 116 for t in (x, y, z)]
+    return 116 * f[1] - 16, 500 * (f[0] - f[1]), 200 * (f[1] - f[2])
+
+
+def delta_e(c1, c2) -> float:
+    a, b = to_lab(c1), to_lab(c2)
+    return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
+
+
+# 前景字段 → 落底背景 + 最低对比度 + 是否随字号放宽（正文按 WCAG AA：≥18pt 降到 3:1）。
+CONTRAST_RULES = [
+    ("candidateTextColor", "window", 4.5, "候选正文", True),
+    ("selectedTextColor", "pill", 4.5, "高亮正文", True),
+    ("originCodeColor", "window", 3.0, "编码行", False),
+    ("candidateIndexColor", "window", 2.0, "序号", False),
+    ("selectedIndexColor", "pill", 2.0, "高亮序号", False),
+    ("candidateCodeColor", "window", 2.0, "提示码", False),
+    ("selectedCodeColor", "pill", 2.0, "高亮提示码", False),
+    ("candidateScoreColor", "pill", 2.0, "整句打分", False),
+    ("pageIndicatorColor", "window", 2.0, "页码", False),
+    ("pageIndicatorDisabledColor", "window", 1.4, "页码不可用态", False),
+]
+PILL_MIN_DE = 4.0     # 高亮胶囊与窗口底色的 Lab 色差，低于此肉眼看不出「这一行被选中」
+SELECT_MIN_DE = 5.0   # 选中正文与未选中正文的最色差（允许只靠色相区分，但必须看得出来）
+
+
+# ---------------------------------------------------------------------------
+# 检查
+# ---------------------------------------------------------------------------
+
+
+class Report:
+    def __init__(self):
+        self.items: list[tuple[str, str, str]] = []  # (level, where, message)
+
+    def error(self, where, msg):
+        self.items.append(("error", where, msg))
+
+    def warn(self, where, msg):
+        self.items.append(("warn", where, msg))
+
+    def info(self, where, msg):
+        self.items.append(("info", where, msg))
+
+    def counts(self):
+        return (sum(1 for l, *_ in self.items if l == "error"),
+                sum(1 for l, *_ in self.items if l == "warn"))
+
+
+def check_appearance(rep: Report, where: str, a: dict, model: dict, require_all: bool):
+    fields = model["appearance"]
+    for key, val in a.items():
+        if key not in fields:
+            rep.error(f"{where}.{key}", f"源码里没有这个字段（拼错？最接近：{nearest(key, fields)}）")
+    for key, spec in fields.items():
+        if key in a:
+            continue
+        msg = "未提供，渲染时回落默认值"
+        if spec["optional"]:
+            (rep.error if require_all else rep.warn)(f"{where}.{key}", f"{msg}（可选字段）")
+        else:
+            rep.error(f"{where}.{key}", f"{msg}（必填字段，解码会报错）")
+
+    for key in model["colors"]:
+        if key in a:
+            if parse_hex(a[key]) is None:
+                rep.error(f"{where}.{key}", f"非法颜色 {a[key]!r}（支持 #RGB/#RGBA/#RRGGBB/#RRGGBBAA）")
+    for key in model["floats"]:
+        if key not in a:
+            continue
+        v = a[key]
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            rep.error(f"{where}.{key}", f"应为数字，实际 {v!r}")
+            continue
+        if key in model["ranges"]:
+            lo, hi = model["ranges"][key]
+            if not lo <= v <= hi:
+                rep.error(f"{where}.{key}", f"{v} 超出设置面板区间 {lo:g}...{hi:g}（保存时会被滑块夹掉）")
+    for key in model["bools"]:
+        if key in a and not isinstance(a[key], bool):
+            rep.error(f"{where}.{key}", f"应为 true/false，实际 {a[key]!r}")
+    for key in model["strings"]:
+        if key in a and not isinstance(a[key], str):
+            rep.error(f"{where}.{key}", f"应为字符串，实际 {a[key]!r}")
+    if "fontName" in a and isinstance(a["fontName"], str) and a["fontName"] != "system":
+        rep.info(f"{where}.fontName", f"自定义字体 {a['fontName']!r}：机器上没有时静默回退系统字体")
+
+    def num(key):
+        v = a.get(key)
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    # 有描边宽度却没有描边颜色 → 回落全透明，边框等于没画
+    width, border = num("windowBorderWidth"), a.get("windowBorderColor")
+    if width and width > 0 and border is None:
+        rep.warn(f"{where}.windowBorderWidth", f"线宽 {width:g} 但没给 windowBorderColor，边框会回落成全透明（看不见）")
+    if not width and border is not None:
+        rep.warn(f"{where}.windowBorderColor", "给了描边颜色但线宽为 0/缺省，不会画边框")
+
+    # 字号层级：正文 > 提示码，序号不抢正文，倒挂会让候选词不再是视觉主角
+    fs, code, idx = num("fontSize"), num("candidateCodeFontSize"), num("candidateIndexFontSize")
+    if fs is not None and code is not None and fs <= code:
+        rep.warn(where, f"正文字号 {fs:g} 未大于提示码字号 {code:g}，层级倒挂")
+    if fs is not None and idx is not None and idx > fs:
+        rep.warn(where, f"序号字号 {idx:g} 大于正文字号 {fs:g}，会抢正文的注意力")
+    if "originCandidatesSpace" in a:
+        rep.info(f"{where}.originCandidatesSpace",
+                 "当前版本渲染未使用（预留字段），写值只为兼容老主题")
+
+
+def nearest(key: str, keys) -> str:
+    m = difflib.get_close_matches(key, list(keys), n=1, cutoff=0.4)
+    return m[0] if m else "-"
+
+
+def check_contrast(rep: Report, where: str, a: dict):
+    win = parse_hex(a.get("windowBackgroundColor", ""))
+    if not win:
+        rep.info(where, "窗口底色缺失或非法，跳过对比度/色差检查")
+        return
+    win_rgb = win[:3]
+    bg_hex = a.get("selectedBackgroundColor")
+    pill = over(parse_hex(bg_hex), win_rgb) if bg_hex and parse_hex(bg_hex) else win_rgb
+    if bg_hex and parse_hex(bg_hex):
+        de = delta_e(pill, win_rgb)
+        if de < PILL_MIN_DE:
+            rep.warn(f"{where}.selectedBackgroundColor",
+                     f"高亮胶囊与窗口底色色差 ΔE={de:.1f} < {PILL_MIN_DE:g}，选中态几乎不可见")
+    if "selectedTextColor" in a and "candidateTextColor" in a:
+        de = delta_e(parse_hex(a["selectedTextColor"])[:3], parse_hex(a["candidateTextColor"])[:3])
+        if de < SELECT_MIN_DE:
+            rep.warn(f"{where}.selectedTextColor",
+                     f"与未选中正文色差 ΔE={de:.1f} < {SELECT_MIN_DE:g}，分不清当前项")
+    fs = a.get("fontSize", 16)
+    for key, ground, need, label, scale_with_size in CONTRAST_RULES:
+        if key not in a or parse_hex(a[key]) is None:
+            continue
+        if scale_with_size and isinstance(fs, (int, float)) and fs >= 18:
+            need = 3.0  # WCAG AA-Large：≥18pt 正文适用 3:1
+        base = pill if ground == "pill" else win_rgb
+        ratio = contrast(parse_hex(a[key])[:3], base)
+        if ratio < need:
+            rep.warn(f"{where}.{key}",
+                     f"{label}对比度 {ratio:.2f}:1 低于 {need}:1（底色 {''.join('%02X' % c for c in to_255(base))}）")
+
+
+def check_theme(rep: Report, path: str, model: dict, require_all: bool, check_contrast_on: bool = True):
+    try:
+        raw = read(path)
+    except OSError as e:
+        rep.error(path, f"读不到文件：{e}")
+        return None
+    try:
+        cfg = json.loads(strip_json_comments(raw))
+    except json.JSONDecodeError as e:
+        rep.error(path, f"JSON 无效（剥离注释后）：line {e.lineno} col {e.colno}: {e.msg}")
+        return None
+    if not isinstance(cfg, dict):
+        rep.error(path, "顶层必须是对象")
+        return None
+
+    for key in ("id", "name", "author"):
+        if key not in cfg:
+            rep.error(path, f"缺少 {key}（parseThemeConfig 会直接判为「缺少 ID、名称或作者」）")
+        elif not isinstance(cfg[key], str) or not cfg[key].strip():
+            rep.error(f"{path}.{key}", "不能为空")
+    if "schemaVersion" not in cfg:
+        rep.warn(path, f"未写 schemaVersion，按 1 处理（当前结构版本 {model['schema']}）")
+    elif not isinstance(cfg.get("schemaVersion"), int) or isinstance(cfg.get("schemaVersion"), bool) \
+            or cfg["schemaVersion"] < 1:
+        rep.error(f"{path}.schemaVersion", f"应为正整数，实际 {cfg.get('schemaVersion')!r}")
+    elif cfg["schemaVersion"] > model["schema"]:
+        rep.warn(f"{path}.schemaVersion",
+                 f"{cfg['schemaVersion']} 高于本仓库支持的 {model['schema']}，新字段会被当旧主题回落")
+    if "light" not in cfg:
+        rep.error(path, "缺少 light 配色（唯一必填的一套）")
+    if "dark" not in cfg:
+        rep.warn(path, "缺少 dark 配色：深色模式下会复用 light，暗底可能刺眼")
+    for mode in ("light", "dark"):
+        if mode in cfg:
+            if not isinstance(cfg[mode], dict):
+                rep.error(f"{path}.{mode}", "应为对象")
+                continue
+            where = f"{os.path.basename(path)}:{mode}"
+            check_appearance(rep, where, cfg[mode], model, require_all)
+            if check_contrast_on:
+                check_contrast(rep, where, cfg[mode])
+    for key in cfg:
+        if key not in model["top"]:
+            rep.error(f"{path}.{key}", f"顶层未知字段（拼错？最接近：{nearest(key, model['top'])}）")
+    return cfg
+
+
+# ---------------------------------------------------------------------------
+# 预览渲染（可选，需要 Pillow）
+# ---------------------------------------------------------------------------
+
+CJK_FONT_CANDIDATES = [
+    ("/System/Library/Fonts/PingFang.ttc", None),
+    ("/System/Library/Fonts/Hiragino Sans GB.ttc", None),
+    ("/System/Library/Fonts/STHeiti Light.ttc", None),
+    ("/System/Library/Fonts/Supplemental/Songti.ttc", None),
+    ("/System/Library/Fonts/Supplemental/Arial Unicode.ttf", None),
+]
+
+
+def pick_cjk_font(size: int):
+    from PIL import ImageFont
+
+    for path, _ in CJK_FONT_CANDIDATES:
+        if not os.path.exists(path):
+            continue
+        for idx in range(6):
+            try:
+                f = ImageFont.truetype(path, size, index=idx)
+            except OSError:
+                break
+            name = " ".join(str(x) for x in f.getname())
+            if any(t in name for t in ("PingFang", "Hiragino", "Heiti", "Songti", "Unicode", "Han", "Noto")):
+                return f, name
+    return None, None
+
+
+def resolve_latin_font(name: str):
+    """主题 fontName → 本机字体文件（仅用于预览近似渲染）。
+
+    命中不了返回 (None, False)：App 里 NSFont(name:) 也会静默回退系统字体，
+    所以“本机没有”本身就是值得知道的信号。
+    """
+    if not name or name == "system":
+        return None, True
+    want = re.sub(r"[ _-]", "", name).lower()
+    for d in ("/System/Library/Fonts", "/System/Library/Fonts/Supplemental",
+              os.path.expanduser("~/Library/Fonts"), "/Library/Fonts"):
+        if not os.path.isdir(d):
+            continue
+        for fn in sorted(os.listdir(d)):
+            if not re.search(r"\.(ttf|ttc|otf)$", fn, re.I):
+                continue
+            if re.sub(r"[ _-]", "", os.path.splitext(fn)[0]).lower() == want:
+                return os.path.join(d, fn), True
+    return None, False
+
+
+def render_preview(cfg: dict, out_path: str, scale: int = 2) -> str:
+    from PIL import Image, ImageDraw, ImageFont
+
+    rows = [("1", "业火", "oate", 2418), ("2", "业精于勤", "oogl", 1872),
+            ("3", "执业", "ob", 903), ("4", "作业", "wet", 611), ("5", "业已", "tnn", 288)]
+    cjk, cjk_name = pick_cjk_font(17 * scale)
+    latin, latin_ok = resolve_latin_font(cfg.get("light", {}).get("fontName", "system"))
+    sf = latin or ("/System/Library/Fonts/SFNS.ttf" if os.path.exists("/System/Library/Fonts/SFNS.ttf")
+                   else "/System/Library/Fonts/Helvetica.ttc")
+
+    def F(size):
+        return ImageFont.truetype(sf, int(round(size * scale)))
+
+    def C(size):
+        return cjk or ImageFont.truetype(sf, int(round(size * scale)))
+
+    W, H = 1180, 560
+    img = Image.new("RGB", (W * scale, H * scale))
+    d = ImageDraw.Draw(img, "RGBA")
+    for y in range(H * scale):  # 中性桌面渐变，浅/深两套都能看清边缘
+        t = y / (H * scale)
+        d.line((0, y, W * scale, y), fill=(int(206 - 46 * t), int(208 - 48 * t), int(214 - 50 * t)))
+
+    def col(a, key, default="#000000"):
+        """主题里的 hex → Pillow 可用的 0..255 颜色（缺字段按黑色兜底，只影响预览）。"""
+        c = parse_hex(a.get(key, default)) if isinstance(a.get(key), str) else None
+        return to_255(c if c else (0, 0, 0, 1))
+
+    def text_w(s, f):
+        b = f.getbbox(s)
+        return b[2] - b[0]
+
+    def window(a, x, y, vertical, origin="oat"):
+        x, y = x * scale, y * scale
+        fI, fC, fS = F(a.get("candidateIndexFontSize", 11)), F(a.get("candidateCodeFontSize", 12)), F(a.get("candidateScoreFontSize", 11))
+        fCJK = C(a["fontSize"])
+        padL, padR = a["windowPaddingLeft"] * scale, a["windowPaddingRight"] * scale
+        padT, padB = a["windowPaddingTop"] * scale, a["windowPaddingBottom"] * scale
+        gap, rowPad = a["candidateSpace"] * scale, a.get("candidateRowPadding", 4) * scale
+        radius = a["windowBorderRadius"] * scale
+        lb = fCJK.getbbox("国")
+        lineH = lb[3] - lb[1]
+        rowH = lineH + rowPad * 2
+        idxW = max(text_w(i, fI) for i, *_ in rows)
+        tw = max(text_w(w, fCJK) for _, w, *_ in rows)
+        cw = max(text_w(c, fC) for _, _, c, _ in rows)
+        sw = max(text_w(str(s), fS) for _, _, _, s in rows)
+        if vertical:
+            content = idxW + gap + tw + gap + cw + gap + sw
+            width, height = content + padL + padR, padT + rowH * len(rows) + padB + rowH // 2
+        else:
+            pageW = text_w("2/5", fI) + gap  # 页码在横排里是行尾的一项，计入窗宽
+            width = sum(text_w(i, fI) + gap + text_w(w, fCJK) for i, w, *_ in rows) - gap + padL + padR + pageW
+            height = padT + int(lineH * 1.15) + rowH + padB
+        win = col(a, "windowBackgroundColor")
+        pill = col(a, "selectedBackgroundColor")
+        d.rounded_rectangle((x, y, x + width, y + height), radius=radius, fill=win)
+        if vertical:
+            cx = x + padL
+            for n, (idx, word, code, score) in enumerate(rows):
+                ry = y + padT + n * rowH
+                if n == 0:
+                    d.rounded_rectangle((cx - padL / 2, ry, cx + content + padR / 2, ry + rowH),
+                                        radius=radius / 2, fill=pill)
+                sel = n == 0
+                d.text((cx, ry + rowPad), idx, font=fI,
+                       fill=col(a, "selectedIndexColor" if sel else "candidateIndexColor"))
+                d.text((cx + idxW + gap, ry + rowPad), word, font=fCJK,
+                       fill=col(a, "selectedTextColor" if sel else "candidateTextColor"))
+                d.text((cx + idxW + gap + tw + gap, ry + rowPad + (lineH - fC.getbbox("ab")[3]) // 2),
+                       code, font=fC, fill=col(a, "selectedCodeColor" if sel else "candidateCodeColor"))
+                d.text((cx + idxW + gap + tw + gap + cw + gap, ry + rowPad), str(score), font=fS,
+                       fill=col(a, "candidateScoreColor"))
+            d.text((x + width - padR - text_w("2/5", fI), y + height - padB - rowH // 2 + rowPad // 2),
+                   "2/5", font=fI, fill=col(a, "pageIndicatorColor"))
+        else:
+            d.text((x + padL, y + padT), origin, font=fC, fill=col(a, "originCodeColor"))
+            ow = text_w(origin, fC)
+            d.rectangle((x + padL + ow + 1, y + padT + 2, x + padL + ow + 1 + scale,
+                         y + padT + 2 + int(lineH * 0.95)), fill=col(a, "candidateTextColor"))
+            cur = x + padL
+            ty = y + padT + int(lineH * 1.15) + rowPad
+            for n, (idx, word, code, score) in enumerate(rows):
+                w = text_w(idx, fI) + gap + text_w(word, fCJK)
+                sel = n == 0
+                if sel:
+                    d.rounded_rectangle((cur - gap / 2, ty - rowPad, cur + w + gap / 2, ty - rowPad + rowH),
+                                        radius=radius / 2, fill=pill)
+                d.text((cur, ty), idx, font=fI, fill=col(a, "selectedIndexColor" if sel else "candidateIndexColor"))
+                d.text((cur + text_w(idx, fI) + gap, ty), word, font=fCJK,
+                       fill=col(a, "selectedTextColor" if sel else "candidateTextColor"))
+                cur += w + gap
+            d.text((cur, ty), "2/5", font=fI, fill=col(a, "pageIndicatorColor"))
+        bw = a.get("windowBorderWidth") or 0
+        if bw > 0:
+            d.rounded_rectangle((x, y, x + width, y + height), radius=radius,
+                                outline=col(a, "windowBorderColor"),
+                                width=max(1, int(round(bw * scale))))
+        return width, height
+
+    modes = [("light", cfg["light"])] + ([("dark", cfg["dark"])] if isinstance(cfg.get("dark"), dict) else [])
+    for i, (_, a) in enumerate(modes):
+        window(a, 40, 40 + i * 240, False)
+        window(a, 660, 40 + i * 240, True)
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
+    img.resize((W, H), Image.LANCZOS).save(out_path)
+    note = f"中文 {cjk_name or '系统字体'}"
+    note += f"，拉丁 {os.path.basename(sf)}" if latin else "，拉丁 系统字体"
+    if not latin_ok:
+        note += "（主题字体本机未找到，App 里也会回退）"
+    return note
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(
+        prog="theme-lint", description="Fire 主题 JSON 静态检查 + 预览",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="示例：\n  ./scripts/theme-lint themes/celadon.theme.json\n"
+               "  ./scripts/theme-lint --require-all --preview /tmp/preview.png themes/*.theme.json")
+    p.add_argument("files", nargs="*", help="*.theme.json（不给则检查 themes/ 下全部）")
+    p.add_argument("--repo", help="仓库根（默认自源码位置向上找）")
+    p.add_argument("--require-all", action="store_true", help="可选字段缺失也算 error")
+    p.add_argument("--strict", action="store_true", help="warning 升级为 error")
+    p.add_argument("--no-contrast", action="store_true", help="跳过对比度/层级检查")
+    p.add_argument("--against", metavar="GLOB", default="themes/*.theme.json",
+                   help="id/name 冲突扫描范围（默认 themes/*.theme.json，传空串关闭）")
+    p.add_argument("--preview", metavar="DIR", help="把预览 PNG 写到该目录（每个主题一张）")
+    p.add_argument("-v", "--verbose", action="store_true", help="打印 info 级提示（字体回退、预留字段等）")
+    p.add_argument("--model", action="store_true", help="只打印解析出的参数模型后退出")
+    p.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+    args = p.parse_args(argv)
+
+    repo = find_repo(args.repo or os.path.dirname(os.path.abspath(__file__)) + "/..")
+    model = load_model(repo)
+
+    if args.model:
+        print(f"ApperanceThemeConfig：{len(model['appearance'])} 个参数"
+              f"（必填 {sum(1 for v in model['appearance'].values() if not v['optional'])} / "
+              f"可选 {sum(1 for v in model['appearance'].values() if v['optional'])}），"
+              f"schemaVersion {model['schema']}")
+        for k, v in model["appearance"].items():
+            rng = model["ranges"].get(k)
+            print(f"  {k:<28} {v['type']:<9} {'可选' if v['optional'] else '必填'}"
+                  + (f"  区间 {rng[0]:g}...{rng[1]:g}" if rng else ""))
+        return 0
+
+    files = args.files or sorted(glob.glob(os.path.join(repo, "themes/*.theme.json")))
+    if not files:
+        sys.exit("2: 没有要检查的文件")
+
+    rep = Report()
+    configs: dict[str, dict] = {}
+    for f in files:
+        cfg = check_theme(rep, f, model, args.require_all, not args.no_contrast)
+        if cfg:
+            configs[f] = cfg
+
+    # id / name 冲突（含仓库内置主题）
+    if args.against:
+        pool: list[tuple[str, str, str]] = []
+        for f in sorted(glob.glob(os.path.join(repo, args.against))):
+            try:
+                c = json.loads(strip_json_comments(read(f)))
+            except Exception:
+                continue
+            pool.append((f, str(c.get("id", "")), str(c.get("name", ""))))
+        for f in files:
+            for g, gid, gname in pool:
+                if os.path.abspath(g) == os.path.abspath(f):
+                    continue
+                cfg = configs.get(f, {})
+                if cfg.get("id") and cfg.get("id") == gid:
+                    rep.error(f"{f}.id", f"与 {os.path.relpath(g, repo)} 的 id 重复（{gid}），导入会互相覆盖")
+                if cfg.get("name") and cfg.get("name") == gname:
+                    rep.warn(f"{f}.name", f"与 {os.path.relpath(g, repo)} 的显示名重复（{gname}）")
+
+    preview_notes = []
+    if args.preview:
+        try:
+            import PIL  # noqa: F401
+        except ImportError:
+            sys.exit("2: --preview 需要 Pillow：pip3 install pillow")
+        for f, cfg in configs.items():
+            out = os.path.join(args.preview, os.path.splitext(os.path.basename(f))[0] + ".preview.png")
+            used = render_preview(cfg, out)
+            preview_notes.append((out, used))
+
+    errors, warns = rep.counts()
+    if args.strict and warns:
+        errors += warns
+
+    if args.json:
+        given = {os.path.relpath(f, repo): len(set(configs.get(f, {}).get("light", {})) & set(model["appearance"]))
+                 for f in files}
+        print(json.dumps({
+            "files": [os.path.relpath(f, repo) for f in files],
+            "paramsPerAppearance": len(model["appearance"]),
+            "schemaVersion": model["schema"],
+            "paramsGiven": given,
+            "issues": [{"level": l, "where": w, "message": m} for l, w, m in rep.items],
+            "errors": errors, "warnings": warns,
+            "previews": [n for n, _ in preview_notes],
+        }, ensure_ascii=False, indent=2))
+    else:
+        hidden = 0
+        for level, where, msg in rep.items:
+            if level == "info" and not args.verbose:
+                hidden += 1
+                continue
+            tag = {"error": "✗", "warn": "!", "info": "·"}[level]
+            print(f"{tag} {level:<5} {where}: {msg}")
+        for f in files:
+            rel = os.path.relpath(f, repo)
+            a = configs.get(f, {}).get("light", {})
+            given = len(set(a) & set(model["appearance"]))
+            print(f"  {rel}: 参数 {given}/{len(model['appearance'])}"
+                  + ("（全给齐）" if given == len(model["appearance"]) else ""))
+        for out, used in preview_notes:
+            print(f"  预览: {out}（{used}）")
+        print(f"{'✓ 通过' if errors == 0 else '✗ 未通过'}：{errors} error, {warns} warning"
+              + (f"（另有 {hidden} 条 info，-v 查看）" if hidden else "")
+              + ("（--strict 下 warning 计为 error）" if args.strict and warns else ""))
+    return 1 if errors else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

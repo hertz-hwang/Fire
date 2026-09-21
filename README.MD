@@ -131,5 +131,23 @@ sudo chmod -R 777 /Library/Input Methods
 ```
 
 
+## 主题
+
+候选窗主题是 JSONC（允许注释），一个 `light` + `dark` 的对象，共 28 个参数（窗口底色/内边距/圆角/描边、
+编码行、候选正文/序号/提示码、选中态与高亮底色、页码、整句打分、字体与各级字号、行留白）。
+`themes/` 下是可直接抄的完整样例。
+
+```bash
+./scripts/theme-lint --model                                  # 列出全部参数、必填性与取值区间
+./scripts/theme-lint themes/*.theme.json                      # 检查已有主题
+./scripts/theme-lint --require-all --strict --preview /tmp/p themes/my.theme.json   # 投稿级检查 + 预览图
+```
+
+`scripts/theme-lint` 只依赖标准库（`--preview` 需 Pillow）：字段表与滑块区间是从
+`Fire/Theme/ThemeConfig.swift` 和 `Fire/Preferences/ThemeEditorView.swift` 现场解析的，
+源码新增参数后无需改脚本，它会直接把旧主题标为「未提供」。检查项：未知/缺失字段、非法 hex、
+越界数值（保存时会被滑块夹掉）、id/name 与其它主题冲突，以及 WCAG 对比度与 Lab 色差（选中态是否看得出来）。
+
+
 ## License
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fqwertyyb%2FFire.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fqwertyyb%2FFire?ref=badge_large)
