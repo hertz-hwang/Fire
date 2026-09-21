@@ -1,0 +1,77 @@
+/* 青瓷主题 · Fire 输入法
+ * 设计语言：汝窑天青 —— 冷灰调的「雾白 / 墨青」双色底，单一重音（青瓷绿），
+ * 一处互补点缀（窑铜琥珀，只给整句打分）；发丝描边 + 12pt 大圆角 + 宽松行气，
+ * 高亮不用实底色块，而是 15~17% 的重音晕染胶囊，弱对比、重层次。
+ * 颜色支持 3/4/6/8 位 hex：8 位为 #RRGGBBAA，末两位是透明度（00 全透明 ~ FF 不透明）
+ * 尺寸单位均为 pt；"system" 字体表示系统默认（中文自动走苹方）
+ * 本文件为 JSONC 格式，// 与 注释在导入时会被自动剥离，可直接导入使用 */
+{
+  "schemaVersion": 2,               // 主题结构版本：当前为 2，旧主题缺新字段时回落默认样式
+  "id": "celadon",                  // 主题唯一标识：导入/切换/删除按它识别，勿与内置主题重名
+  "name": "青瓷",                    // 主题显示名：设置 → 主题列表里展示
+  "author": "Bennett",              // 作者署名
+
+  /* ===== 浅色（雾白）：宣纸冷白底 + 深青重音，适合白天长时间输入 ===== */
+  "light": {
+    "windowBackgroundColor": "#F5F7F6",    // 候选框窗口背景色：带一丝绿调的近白，比纯白柔眼
+    "windowPaddingTop": 10,                // 窗口内容距上边缘留白
+    "windowPaddingLeft": 14,               // 窗口内容距左边缘留白：横向比纵向多 4pt，字不贴边
+    "windowPaddingRight": 14,              // 窗口内容距右边缘留白
+    "windowPaddingBottom": 10,             // 窗口内容距下边缘留白
+    "windowBorderRadius": 12,              // 窗口圆角半径：大圆角更当代；高亮条圆角自动为它的一半（6）
+    "windowBorderWidth": 1,                // 窗口描边线宽：1pt 发丝边，只负责把窗体从桌面上「提」出来
+    "windowBorderColor": "#14403C1F",      // 描边颜色：深青 12% 透明，浅底上几乎 invisible 但边界干净
+    "originCodeColor": "#2B7A70",          // 顶部编码行（组字区）文字颜色：青瓷绿，编码是「进行中」，给重音
+    "originCandidatesSpace": 6,            // 编码行与候选区间距（预留字段，当前版本渲染未使用）
+    "candidateSpace": 14,                  // 候选词间距：横排为水平间距、竖排为列间距，比默认 8 宽松一档
+    "candidateIndexColor": "#8C9995",      // 候选序号颜色：灰绿，退到第三层级，不与正文抢注意力
+    "candidateTextColor": "#1B2A28",       // 候选文字颜色：墨青（不是死黑），与冷白底同为绿调家族
+    "candidateCodeColor": "#788783",       // 候选编码提示颜色：中灰绿，明确弱于正文一档
+    "selectedIndexColor": "#2B7A70",       // 高亮候选的序号颜色：重音，让「当前第几个」一眼定位
+    "selectedTextColor": "#0E4F48",        // 高亮候选的文字颜色：比正文更深的青墨，靠明度而非颜色做强调
+    "selectedCodeColor": "#3E8C82",        // 高亮候选的编码提示颜色：重音提亮 15%，仍弱于文字
+    "selectedBackgroundColor": "#2B7A7026",// 高亮候选底色：青瓷绿 15% 晕染胶囊（不用整块实色，靠色相而非色块做强调）
+    "pageIndicatorColor": "#4E5F5B",       // 页码指示（"n/m"）颜色：稳的深灰绿，可点但不喧哗
+    "pageIndicatorDisabledColor": "#8C999566", // 页码不可用态：同色系 40% 透明，直接读作「灰掉了」
+    "candidateScoreColor": "#B0764A",      // 整句打分颜色：窑铜琥珀，与青绿互补，唯一暖色点缀
+    "candidateScoreFontSize": 11,          // 打分字号：与序号同尺寸，保持元信息层级
+    "candidateScoreBold": false,           // 打分不加粗：诊断数字不该比候选词更响
+    "fontName": "system",                  // 字体族：系统 SF + 苹方，中文候选的最佳字形；改 "Menlo" 可得等宽码表感
+    "fontSize": 17,                        // 候选文字字号：比默认 16 大 1pt，配合宽松间距做「呼吸感」
+    "candidateIndexFontSize": 11,          // 序号字号
+    "candidateCodeFontSize": 12,           // 编码提示字号（顶部编码行同用）
+    "candidateRowPadding": 6               // 候选行内上下留白：默认 4 的一半留白翻倍，竖排时行气最明显
+  },
+
+  /* ===== 深色（墨青）：低饱和墨底 + 发光青瓷，边框用同色高光做玻璃切边 ===== */
+  "dark": {
+    "windowBackgroundColor": "#131C1B",    // 候选框窗口背景色：墨青，带绿调的黑，比纯黑少一分生硬
+    "windowPaddingTop": 10,                // 窗口内容距上边缘留白
+    "windowPaddingLeft": 14,               // 窗口内容距左边缘留白
+    "windowPaddingRight": 14,              // 窗口内容距右边缘留白
+    "windowPaddingBottom": 10,             // 窗口内容距下边缘留白
+    "windowBorderRadius": 12,              // 窗口圆角半径：与浅色一致，切换明暗时窗体形状不变
+    "windowBorderWidth": 1,                // 窗口描边线宽：深色下这条边就是「玻璃反光」
+    "windowBorderColor": "#7FD9CB33",      // 描边颜色：浅青 20% 透明，暗底上勾出一圈冷光（玻璃切边）
+    "originCodeColor": "#63CFC0",          // 顶部编码行（组字区）文字颜色：会发光的青瓷，编码区是视觉起点
+    "originCandidatesSpace": 6,            // 编码行与候选区间距（预留字段，当前版本渲染未使用）
+    "candidateSpace": 14,                  // 候选词间距：深底需要更多负空间，避免霓虹感糊成一片
+    "candidateIndexColor": "#5F7470",      // 候选序号颜色：暗青灰，压到背景与正文之间
+    "candidateTextColor": "#D9E5E1",       // 候选文字颜色：冷雾白（非纯白），大面积看不刺眼
+    "candidateCodeColor": "#89A09B",       // 候选编码提示颜色：灰青，比正文低两档明度
+    "selectedIndexColor": "#7FE3D0",       // 高亮候选的序号颜色：亮青，定位当前项
+    "selectedTextColor": "#F4FFFB",        // 高亮候选的文字颜色：提到接近纯白，与未选中项拉开唯一一次强对比
+    "selectedCodeColor": "#9CDBCF",        // 高亮候选的编码提示颜色
+    "selectedBackgroundColor": "#3FBFAD2B",// 高亮候选底色：青绿 17% 晕染，深底上比浅色版略重一档才看得出现
+    "pageIndicatorColor": "#89A09B",       // 页码指示（"n/m"）颜色
+    "pageIndicatorDisabledColor": "#5F747066", // 页码指示不可用态：同色 40% 透明
+    "candidateScoreColor": "#E3A76B",      // 整句打分颜色：琥珀，深底上比铜色更亮，与青绿互补不撞色
+    "candidateScoreFontSize": 11,          // 打分字号
+    "candidateScoreBold": false,           // 打分不加粗
+    "fontName": "system",                  // 字体族：系统默认
+    "fontSize": 17,                        // 候选文字字号
+    "candidateIndexFontSize": 11,          // 序号字号
+    "candidateCodeFontSize": 12,           // 编码提示字号（顶部编码行同用）
+    "candidateRowPadding": 6               // 候选行内上下留白
+  }
+}
