@@ -61,9 +61,11 @@ class ToastWindow: NSWindow, ToastWindowProtocol {
         }
     }
 
+#if !LEAN_BUILD  // 精简工具链构建时跳过 #Preview（PreviewsMacros 宏插件仅随 Xcode 分发）
 #Preview {
     ToastWindow.ToastView(text: "中")
 }
+#endif
 
     private var timer: Timer?
 

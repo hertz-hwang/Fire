@@ -50,6 +50,7 @@ struct PreferenceToggleRow: View {
     }
 }
 
+#if !LEAN_BUILD  // 精简工具链构建时跳过 #Preview（PreviewsMacros 宏插件仅随 Xcode 分发）
 #Preview("Picker") {
     Form {
         PreferencePickerRow(title: "输入法方案") {
@@ -62,7 +63,9 @@ struct PreferenceToggleRow: View {
     .formStyle(.grouped)
     .frame(width: 480)
 }
+#endif
 
+#if !LEAN_BUILD  // 精简工具链构建时跳过 #Preview（PreviewsMacros 宏插件仅随 Xcode 分发）
 #Preview("Toggle") {
     Form {
         PreferenceToggleRow(title: "整句", isOn: .constant(true))
@@ -71,3 +74,4 @@ struct PreferenceToggleRow: View {
     .formStyle(.grouped)
     .frame(width: 480)
 }
+#endif
