@@ -11,6 +11,10 @@ import Defaults
 import InputMethodKit
 import Sparkle
 
+// macOS 27 的 imklaunchagent 会校验此键并打 "Refusing connection name for
+// bundle: unrecognized 'InputMethodConnectionName' value" 日志，但 Modern XPC
+// 模式（见 AppDelegate 的 IMKServerRunLoopModern）下 endpoint 按 bundle ID
+// 匹配、不再依赖连接名，保持与 ≤26 一致的旧名字即可。
 let kConnectionName = "Fire_1_Connection"
 
 class Fire: NSObject {

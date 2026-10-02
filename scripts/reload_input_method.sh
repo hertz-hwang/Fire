@@ -20,6 +20,16 @@ echo "Copying $BUILD_APP -> $APP_PATH"
 sudo rm -rf "$APP_PATH"
 sudo ditto "$BUILD_APP" "$APP_PATH"
 
+# LaunchServices 按 bundle ID 解析输入法（TSM 启动 / imklaunchagent 校验都走它）。
+# 构建目录（/tmp/FireDerivedData/...）与安装路径是同一 bundle ID 的两份记录，
+# 系统若命中构建目录那份（构建后清理、机器重启后 /tmp 清空 → 死记录），
+# 表现为选中输入法后键盘全灭（imklaunchagent: LaunchInputMethod status=-50，
+# 各 App 循环 "NO Endpoint, Bail"）。安装后必须注销构建目录记录、强注安装路径。
+LSREG="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
+echo "Unregistering build-dir LaunchServices record"
+"$LSREG" -u "$BUILD_APP" 2>/dev/null || true
+"$LSREG" -f "$APP_PATH"
+
 echo "Killing running Fire input method (if any)"
 sudo pkill -f "$APP_PATH/Contents/MacOS/Fire" || true
 

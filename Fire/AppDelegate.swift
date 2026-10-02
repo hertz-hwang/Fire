@@ -12,8 +12,27 @@ import Defaults
 import ApplicationServices
 import InputMethodKit
 
+#if LEAN_BUILD
+@main
+#else
 @NSApplicationMain
+#endif
 class AppDelegate: NSObject, NSApplicationDelegate {
+
+#if LEAN_BUILD
+    // 精简工具链（仅 Command Line Tools，无 ibtool）构建时不编译 MainMenu.xib，
+    // 且 Info.plist 没有 NSMainNibFile —— NSApplicationMain 找不到主 nib 的
+    // File's Owner，delegate 为 nil，applicationDidFinishLaunching 永不触发：
+    // Fire.shared（含 IMKServer 实例）从不创建，imklaunchagent 永远
+    // "NO Endpoint"，选中输入法后按键全部直通。这里用代码显式接上 delegate，
+    // 与 nib 的 File's Owner 连线完全等价；Xcode 构建不走此分支。
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        app.run()
+    }
+#endif
 
     var fire: Fire!
     var statistics: Statistics!
@@ -175,6 +194,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
+        // macOS 27 InputMethodKit 起，Legacy DistributedObjects 服务端的
+        // NSConnection 注册名固定为 "<bundleID>_Connection"，而客户端改按
+        // +[IMKServer connectionNameFor:] 的白名单规范化结果 "<bundleID>.Connection"
+        // 查找（白名单只含 Apple 自家 IME，日志: Refusing connection name for
+        // bundle: unrecognized 'InputMethodConnectionName' value），两者永远
+        // 差一个分隔符 → imklaunchagent 始终 "NO Endpoint, Bail"，选中输入法
+        // 后按键全部直通应用。macOS 27+ 打开 Modern XPC 模式：endpoint 直接
+        // 通过 setIMKXPCEndpoint 交给 agent 与客户端，不再依赖连接名字符串。
+        // 必须在 Fire.shared（内部创建 IMKServer）之前注册。
+        if #available(macOS 27, *) {
+            UserDefaults.standard.register(defaults: ["IMKServerRunLoopModern": true])
+        }
         // 已下线的「码表拼音混合」方案：老配置先归到「码表」，再让任何逻辑读 codeMode
         migrateRemovedMixedCodeMode()
         if !commandHandler() {
