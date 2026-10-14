@@ -16,6 +16,12 @@
 //  6. 上下文得分（字级 n-gram 给 `log P(词 | 上文)`，减掉模糊音 / 敲错代价，加对用户选择次数的对数加分）
 //  7. 敲的原音节优先，词长短者优先，最后按字符串稳定排序保证结果可复现
 //
+//  单音节输入（首选切分就是一个完整音节）走一条例外：候选栏只出单字重码，不出词/句。
+//  码表里 `qin` 能切成 `qi n…`、`qing` 能切成 `qin g…`（末尾简拼），那条读法在整句
+//  词图里凑出 七年/其内/秦国/请按 这类整词，把单字重码（亲/琴/勤、请/清/青）压到后面；
+//  单音节本来就是在选单字，整句引擎在这里只帮倒忙。所以单音节输入跳过整句引擎，
+//  词级列表按原排序键走——单字重码靠「末音节完整匹配」一档（`fullLast`）自然排前。
+//
 
 import Foundation
 
@@ -191,6 +197,12 @@ final class PinyinEngine {
             tail = ""
         }
 
+        // 单音节输入（首选切分就是一个完整音节）：候选栏只出单字重码，不出词/句。
+        // 见文件头注释——`qin`/`qing` 会被切成 `qi n…`/`qin g…`（末尾简拼），
+        // 那条读法在整句词图里凑出 七年/其内/秦国/请按 这类整词，把单字重码压到后面。
+        let singleSyllable = segmentations.first.map { $0.patterns.count == 1
+            && $0.patterns.allSatisfy { $0.complete } } ?? false
+
         // 末尾是英文词（`woxiangxuehaorust`）这类混输在本期内不做：尾巴原样留着给组字区显示
 
         var candidates: [PinyinCandidate] = []
@@ -256,20 +268,23 @@ final class PinyinEngine {
         // `xian` 取了 `xi an` 就读不到「先」这类整体词——前 K 种切分各解一遍、
         // 按分数合前五，才把码表里那些跨音节划分的长词都喂给语言模型（实测 K=1 → K=4
         // 在同一份句子集上首选命中率 +7 个点）。
-        var scoredSentences: [PinyinCandidate] = []
-        for best in sentenceSegmentations(segmentations) {
-            let sentencePositions = expandedPositions(best, typos: correction == nil)
-            scoredSentences.append(contentsOf: sentenceTop5(sentencePositions, best: best,
-                                                            leftContext: leftContext,
-                                                            existing: &candidates))
-        }
-        // 跨切分按分数合前五占住开头；同文的词级候选从后面撤掉——
-        // 前五占掉的文本不再出第二遍。
-        let top = Self.topSentences(scoredSentences)
-        if !top.isEmpty {
-            let taken = Set(top.map(\.text))
-            candidates.removeAll { taken.contains($0.text) }
-            candidates.insert(contentsOf: top, at: 0)
+        // 单音节输入跳过整句引擎：它只会用末尾简拼那条读法凑出整词，把单字重码挤下去。
+        if !singleSyllable {
+            var scoredSentences: [PinyinCandidate] = []
+            for best in sentenceSegmentations(segmentations) {
+                let sentencePositions = expandedPositions(best, typos: correction == nil)
+                scoredSentences.append(contentsOf: sentenceTop5(sentencePositions, best: best,
+                                                                leftContext: leftContext,
+                                                                existing: &candidates))
+            }
+            // 跨切分按分数合前五占住开头；同文的词级候选从后面撤掉——
+            // 前五占掉的文本不再出第二遍。
+            let top = Self.topSentences(scoredSentences)
+            if !top.isEmpty {
+                let taken = Set(top.map(\.text))
+                candidates.removeAll { taken.contains($0.text) }
+                candidates.insert(contentsOf: top, at: 0)
+            }
         }
         return PinyinQuery(candidates: candidates, segmentations: segmentations, tail: tail,
                            marked: markedText(scope: scope, decoded: decoded, tail: tail,

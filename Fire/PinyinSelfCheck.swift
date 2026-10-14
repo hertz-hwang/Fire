@@ -87,6 +87,14 @@ enum PinyinSelfCheck {
         }
         expect(engine.compose("ni")?.candidates.first?.isSentence == false,
                "单音节没有组句，前五仍是词级单字重码")
+        // 单音节输入只出单字重码：`qin`/`qing` 会被切成 `qi n…`/`qin g…`（末尾简拼），
+        // 那条读法在整句词图里凑出 七年/其内/秦国/请按 这类整词，把单字重码压到后面——
+        // 现在整句引擎对单音节输入整体关闭，前五必须是单字且不出整句候选。
+        for keys in ["qin", "qing", "xian"] {
+            let top = engine.compose(keys)?.candidates.prefix(5) ?? []
+            expect(top.allSatisfy { !$0.isSentence && $0.text.count == 1 },
+                   "单音节 \(keys) 前五全是单字重码：\(top.map(\.text))")
+        }
         expect(engine.compose("kf")?.candidates.contains { $0.text == "开发" } == true,
                "简拼 kf 出 开发（今天的拼音路径做不到这一条）")
         expect(engine.compose("kaif")?.candidates.contains { $0.text == "开" } == true,

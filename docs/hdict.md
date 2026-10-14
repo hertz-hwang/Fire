@@ -1,6 +1,6 @@
 # `.hdict` 私有词库容器与拼音词库
 
-> 一句话：拼音词库从 8.2 万条明文 `py_table.txt` 换成 47.5 万条带词频的
+> 一句话：拼音词库从 8.2 万条明文 `py_table.txt` 换成 99 万条带词频的
 > `py.hdict`（rime 字词库合并注音 → 统一码表行流 → raw deflate 压缩 → 定长头容器），
 > 拼音/双拼共用这一份。
 
@@ -9,7 +9,7 @@
 1. **老词库没词频**。8.2 万条 `候选\t连写全拼`，同码重码的次序只能靠文件序，而文件是按
    拼音字母排的 —— 「组织 / 阻止 / 阻滞 / 足趾」谁常用，表里答不出来。拼音侧的
    `ordinal`（重码序号）直接喂给解码器的轻罚与格子截断，次序错了等于打分错了。
-2. **覆盖面**。老表 8.2 万条，收集的 rime 字词库去掉长尾后仍有 47.5 万条可用，
+2. **覆盖面**。老表 8.2 万条，收集的 rime 字词库全量（含腾讯长尾与大字表）有 99 万条可用，
    同音词与词条的覆盖都厚了一个量级。
 3. **体积**。词库要进 app 包随 pkg 分发：明文 26 MB 太大，`.hdict` 里 deflate 后 5.7 MB。
 
@@ -42,8 +42,8 @@
   拼音音节索引、整句词图、sqlite 建表三条读路共用同一套「`候选\t编码[\t词频]`」解析，
   明文 txt 与容器只差一个 `HDict.tableText`。
 - **flags 的「已规范化」声明**：写侧保证词面无空白、编码只用 `a-z`、`(词,码)` 已去重，
-  读侧据此跳过逐行 trim 与去重集（47.5 万条下载入 2.29s → 1.85s）。手写表不打这个标记，
-  照旧逐行校验。
+  读侧据此跳过逐行 trim 与去重集（standard 档实测 2.29s → 1.85s；full 档载入约 5.0s，
+  同样省下这段）。手写表不打这个标记，照旧逐行校验。
 
 校验分工：载入路径查 magic / 版本 / 头部 CRC / 声明长度 / inflate 结果长度 /
 UTF-8 可解码，词条数与容器声明不一致就写日志；负载逐字节的 CRC32 只在
@@ -54,13 +54,13 @@ UTF-8 可解码，词条数与容器声明不一致就写日志；负载逐字�
 
 `tmp/pinyin_dict/`（rime 格式 `词\t音节 音节…\t词频`，来自 rime-ice）：
 
-| 文件 | 内容 | 默认档 |
-|------|------|--------|
-| `base.dict.yaml` | 基础词库 | 词频 ≥5 收录 |
-| `ext.dict.yaml` | 扩充词库 | 词频 ≥5 收录 |
+| 文件 | 内容 | 默认档（full） |
+|------|------|----------------|
+| `base.dict.yaml` | 基础词库 | 词频 ≥1 收录 |
+| `ext.dict.yaml` | 扩充词库 | 词频 ≥1 收录 |
 | `8105.dict.yaml` | 《通用规范汉字表》+ 25 亿语料字频 | 全量收录 |
-| `tencent.dict.yaml` | 腾讯长尾（词频基本为 0） | 不进默认档 |
-| `41448.dict.yaml` | 大字表（生僻字） | 不进默认档 |
+| `tencent.dict.yaml` | 腾讯长尾（词频基本为 0） | 全量收录 |
+| `41448.dict.yaml` | 大字表（生僻字） | 全量收录 |
 
 处理规则：
 
@@ -126,15 +126,15 @@ UTF-8 可解码，词条数与容器声明不一致就写日志；负载逐字�
 ## 重新生成词库
 
 ```bash
-# 默认档（standard：base≥5 + ext≥5 + 8105）→ Fire/Resources/schemas/py.hdict
+# 默认档（full：base≥1 + ext≥1 + tencent + 8105 + 41448）→ Fire/Resources/schemas/py.hdict
 python3 scripts/build_pinyin_hdict.py
 
 # 体检：magic / 版本 / 头部 CRC / 负载 CRC / 长度 / 词条数逐项核对
 python3 scripts/build_pinyin_hdict.py --verify Fire/Resources/schemas/py.hdict
 
-# 换档：core 更轻（27 万条），full 全量（99 万条，实测首选反而略降、逐键更慢）
+# 换档：core 更轻（27 万条），standard 均衡（47.5 万条）
 python3 scripts/build_pinyin_hdict.py --tier core --out /tmp/py_core.hdict
-python3 scripts/build_pinyin_hdict.py --tier full  --plain /tmp/py_full.txt
+python3 scripts/build_pinyin_hdict.py --tier standard --plain /tmp/py_standard.txt
 
 # 手工挑源与准入词频
 python3 scripts/build_pinyin_hdict.py \
@@ -149,12 +149,13 @@ python3 scripts/build_pinyin_hdict.py \
 | 档 | 词条 | 首选 / 字 | 载入 | 逐键 p99 |
 |----|------|-----------|------|----------|
 | core | 270,055 | 47.7% / 88.2% | 1.1s | 32 ms |
-| **standard（默认）** | **475,342** | **48.6% / 88.6%** | **1.9s** | **62 ms** |
-| full | 992,524 | 48.2% / 88.4% | 5.0s | — |
+| standard | 475,342 | 48.6% / 88.6% | 1.9s | 62 ms |
+| **full（默认）** | **992,524** | **48.2% / 88.4%** | **5.0s** | — |
 
-`--tier full` 里 `tencent`（0 频长尾）与 `41448`（生僻字）都是负收益或零收益：
-长尾同音词把格子里的常用词挤掉，实测首选 48.6% → 48.2%；只加 `41448` 更是掉到 47.8%
-（同一个字的第二读音被大量生僻字撑开，重码变深）。所以默认档停在 base+ext+8105。
+full 档里 `tencent`（0 频长尾）与 `41448`（生僻字）都是负收益或零收益：长尾同音词把格子里的
+常用词挤掉，实测首选 48.6% → 48.2%；只加 `41448` 更是掉到 47.8%（同一个字的第二读音被大量
+生僻字撑开，重码变深）。所以 full 是「全量覆盖」档：要长尾词与生僻字覆盖率用它；要更高的
+首选命中率与更快的载入/逐键，换 `--tier standard`（48.6%，1.9s）。
 
 ## 换成明文码表 / 回退
 

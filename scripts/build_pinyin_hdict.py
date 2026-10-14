@@ -321,8 +321,8 @@ def main():
     global MAX_SYLLABLES
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--tier", choices=sorted(TIERS), default="standard",
-                        help="词库组合档位（默认 standard）")
+    parser.add_argument("--tier", choices=sorted(TIERS), default="full",
+                        help="词库组合档位（默认 full）")
     parser.add_argument("--sources",
                         help="自定义源清单 name.yaml[:minWeight],……，给出后忽略 --tier")
     parser.add_argument("--out", default=DEFAULT_OUT, help="输出 .hdict 路径")
