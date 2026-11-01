@@ -57,7 +57,6 @@ class FireInputController: IMKInputController {
     private var _sentenceAllCandidates: [Candidate] = []
     /// 待随下一次 insertText 入撤销栈的学习信息（insertCandidate 设置，insertText 消费）
     private var _pendingCommitLearning: CommitLearningInfo?
-    private var _lastInputText = ""
     // 待二次确认删除的候选词，非 nil 时候选窗处于删除确认态
     private var _pendingDeleteCandidate: Candidate?
     // 组词模式下当前组合的字数，非 nil 时处于"快速加词"组词态
@@ -770,7 +769,6 @@ class FireInputController: IMKInputController {
         }
         _lastInputIsNumber = false
 
-        _lastInputText = getPreviousText()
         fireLog("[FireInputController] predictorHandler range, selectionRange: \(selectionRange()), replacementRange: \(replacementRange()), client.selectedRange: \(client().selectedRange()), client.markedRange: \(client().markedRange())")
 
         return nil
