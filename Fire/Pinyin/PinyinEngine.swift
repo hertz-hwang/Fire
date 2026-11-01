@@ -116,6 +116,12 @@ final class PinyinEngine {
     /// 词级候选的排序与截断上限。
     static let maxCandidates = 60
 
+    /// 单个未完成音节（`z` 这类单字母简拼）一次最多从词表取多少条词目。
+    /// 该输入能命中十几万条，排序只会留前几百条；留 2000 条给「用户加权词 +
+    /// 预选留尾」足够，同时把逐键分配/排序的量压到有界。
+    /// 离线对拍：2000 与不设上限时，26 个单字母的前 60 条候选逐字一致。
+    static var singleSyllableMatchLimit = 2000
+
     /// 组字区最多吸收多少个键：引擎每键整段重解，开销随音节数涨，必须封顶。
     /// 256 键与形码整句的手动上限同源（`SentenceConfig.manualMaxRawLength`）——
     /// 全拼约 128 个音节、双拼约 128 个词，正常句子碰不到，只兜住「一直敲不停」。
@@ -216,7 +222,7 @@ final class PinyinEngine {
             let abbreviated = PinyinSegmentation.abbreviatedCount(patterns)
             // 词级候选只按敲的原样与模糊音查，敲错变体只进整句词图：
             // 词级排序把音节数对得上的排最前，敲错命中的词会把更长的原样词挤到后面
-            for hit in lexicon.lookupPatternAlt(positions) {
+            for hit in lexicon.lookupPatternAlt(positions, limit: Self.singleSyllableMatchLimit) {
                 let syllables = hit.key.split(separator: " ").map(String.init)
                 let fullLast = last.complete
                     && syllables.count == count

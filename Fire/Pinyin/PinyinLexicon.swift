@@ -68,6 +68,10 @@ final class PinyinLexicon {
     private var slotCount: [Int] = []
     private var slotTexts: [String] = []
     private var slotRanks: [Int] = []
+    /// 该键是否只有一个音节（`exact` 的静态版本）。单字母查询要按它做键级剪枝，
+    /// 不能每次都去 `keys[entry].contains(" ")`——`z` 下有十七万个键，光 String 访问
+    /// 就是二十多毫秒。
+    private var keyExact: [Bool] = []
 
     private(set) var loadedPath: String?
     private(set) var entryCount = 0
@@ -138,15 +142,18 @@ final class PinyinLexicon {
             return lhs.text < rhs.text
         }
         var newKeys: [String] = []
+        var newExact: [Bool] = []
         var newStart: [Int] = []
         var newCount: [Int] = []
         var texts: [String] = []
         var ranks: [Int] = []
         newKeys.reserveCapacity(flat.count)
+        newExact.reserveCapacity(flat.count)
         var index = 0
         while index < flat.count {
             let key = flat[index].key
             newKeys.append(key)
+            newExact.append(!key.contains(" "))
             newStart.append(texts.count)
             var seenText = Set<String>()
             while index < flat.count, flat[index].key == key {
@@ -160,6 +167,7 @@ final class PinyinLexicon {
             newCount.append(texts.count - newStart.last!)
         }
         keys = newKeys
+        keyExact = newExact
         slotStart = newStart
         slotCount = newCount
         slotTexts = texts
@@ -203,24 +211,148 @@ final class PinyinLexicon {
     ///
     /// 同一位置的写法之间不能互相覆盖（前缀 `z` 已包含前缀 `zh`），否则命中会重复出现；
     /// `PinyinFuzzyRules.expand` 按这个契约生成写法，这里不去重。
-    func lookupPatternAlt(_ positions: [[PinyinSyllablePattern]]) -> [PinyinMatch] {
-        lookup(positions, exactOnly: false)
+    ///
+    /// `limit` 只作用于「单个未完成音节」这一个病态分支（`z` 这种一个字母的简拼）：
+    /// 该分支的区间能扫出十几万条词目，而排序只关心最常用的几百条。给了上限时按
+    /// 排序键（精确 > 词库名次 > 词短）留前 `limit` 条，其余不再实例化。
+    func lookupPatternAlt(_ positions: [[PinyinSyllablePattern]],
+                          limit: Int = .max) -> [PinyinMatch] {
+        lookup(positions, exactOnly: false, limit: limit)
     }
 
     /// 只要音节数正好等于位置数的词。
     func lookupExactAlt(_ positions: [[PinyinSyllablePattern]]) -> [PinyinMatch] {
-        lookup(positions, exactOnly: true)
+        lookup(positions, exactOnly: true, limit: .max)
     }
 
-    private func lookup(_ positions: [[PinyinSyllablePattern]], exactOnly: Bool) -> [PinyinMatch] {
+    private func lookup(_ positions: [[PinyinSyllablePattern]], exactOnly: Bool,
+                        limit: Int) -> [PinyinMatch] {
         var matches: [PinyinMatch] = []
         guard !positions.isEmpty, positions.allSatisfy({ !$0.isEmpty }), !keys.isEmpty else {
             return matches
+        }
+        // 单键未完成音节：`narrow` 的「前缀且是最后一个」分支会把区间里每个键的
+        // 全部词目都推进来。一个字母命中十几万条，这里改成有界 top-K。
+        if limit != .max, !exactOnly, positions.count == 1, positions[0].count == 1,
+           let only = positions[0].first, !only.complete {
+            return topMatches(prefix: PinyinSyllables.canonical(only.text), limit: limit)
         }
         var prefix = ""
         narrow(positions, depth: 0, prefix: &prefix, range: 0 ..< keys.count,
                exactOnly: exactOnly, out: &matches)
         return matches
+    }
+
+    /// 一个未完成音节前缀下、按排序键最优的前 `limit` 条词目。
+    /// 与 `narrow` 的 `(false, true)` 分支口径一致：`exact` 表示该键就是单个音节。
+    private func topMatches(prefix: String, limit: Int) -> [PinyinMatch] {
+        guard limit > 0 else { return [] }
+        let sub = prefixRange(prefix, 0 ..< keys.count)
+        guard !sub.isEmpty else { return [] }
+        var heap = MatchHeap(limit: limit)
+        for entry in sub {
+            let start = slotStart[entry]
+            let count = slotCount[entry]
+            let exact = keyExact[entry]
+            // 键级剪枝：先取键内最小名次。它都赢不了堆顶的键，整键跳过，
+            // 连 keys[entry] 都不用取。多词目键逐个取 min（词目不多，一次线性扫）。
+            var bestRank = slotRanks[start]
+            if count > 1 {
+                for slot in start + 1 ..< start + count {
+                    bestRank = min(bestRank, slotRanks[slot])
+                }
+            }
+            guard heap.accepts(rank: bestRank, exact: exact) else { continue }
+            let key = keys[entry]
+            for slot in start ..< start + count {
+                let rank = slotRanks[slot]
+                // 先只比 rank / exact：一个字母下十几万个词目，绝大多数在根节点
+                // 面前直接出局，没必要为它们构造 PinyinMatch。
+                guard heap.accepts(rank: rank, exact: exact) else { continue }
+                heap.offer(PinyinMatch(text: slotTexts[slot], key: key,
+                                       rank: rank,
+                                       ordinal: slot - start + 1,
+                                       exact: exact))
+            }
+        }
+        return heap.items
+    }
+
+    /// 固定容量的最大堆（堆顶是当前保留集合里排序最差的一条）。
+    /// 比较口径对齐 `PinyinEngine.Scored.preselectBetter` 里词表能看到的几项。
+    private struct MatchHeap {
+        private(set) var items: [PinyinMatch] = []
+        private let limit: Int
+        /// 堆顶（当前最差一条）的比较键。单独存一份，`accepts` 每槽都读，
+        /// 直接取 `items[0]` 会整份拷贝 PinyinMatch（两个 String 的 retain/release）。
+        private var rootExact = false
+        private var rootRank = Int.max
+
+        init(limit: Int) {
+            self.limit = limit
+            items.reserveCapacity(min(limit, 4096))
+        }
+
+        /// 只在「可能进保留集合」时才让调用方构造 PinyinMatch；等 rank 的交给
+        /// `offer` 用词长做最后裁决。
+        func accepts(rank: Int, exact: Bool) -> Bool {
+            guard items.count >= limit else { return true }
+            if exact != rootExact { return exact }
+            return rank <= rootRank
+        }
+
+        private mutating func refreshRoot() {
+            guard let root = items.first else { return }
+            rootExact = root.exact
+            rootRank = root.rank
+        }
+
+        mutating func offer(_ match: PinyinMatch) {
+            if items.count < limit {
+                items.append(match)
+                siftUp(items.count - 1)
+            } else if Self.better(match, than: items[0]) {
+                items[0] = match
+                siftDown(0)
+            }
+            refreshRoot()
+        }
+
+        private static func better(_ a: PinyinMatch, than b: PinyinMatch) -> Bool {
+            if a.exact != b.exact { return a.exact }
+            if a.rank != b.rank { return a.rank < b.rank }
+            return a.text.count < b.text.count
+        }
+
+        private func worse(_ a: PinyinMatch, than b: PinyinMatch) -> Bool {
+            Self.better(b, than: a)
+        }
+
+        private mutating func siftUp(_ index: Int) {
+            var child = index
+            while child > 0 {
+                let parent = (child - 1) / 2
+                guard worse(items[child], than: items[parent]) else { break }
+                items.swapAt(child, parent)
+                child = parent
+            }
+        }
+
+        private mutating func siftDown(_ index: Int) {
+            var parent = index
+            while true {
+                let left = parent * 2 + 1
+                guard left < items.count else { break }
+                let right = left + 1
+                var worst = left
+                if right < items.count, worse(items[right], than: items[left]) {
+                    worst = right
+                }
+                guard worse(items[worst], than: items[parent]) else { break }
+                items.swapAt(parent, worst)
+                parent = worst
+            }
+        }
     }
 
     /// 在 `range`（其中的键都以 `prefix` 开头，`prefix` 为空或以空格结尾）里按
