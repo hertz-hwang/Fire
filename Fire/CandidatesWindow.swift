@@ -9,6 +9,7 @@
 import SwiftUI
 import InputMethodKit
 import Defaults
+import os
 
 typealias CandidatesData = (list: [Candidate], hasPrev: Bool, hasNext: Bool, page: Int, pageCount: Int)
 
@@ -219,6 +220,9 @@ class CandidatesWindow: NSWindow, NSWindowDelegate {
         caretRect: NSRect,
         highlightIndex: Int = 0
     ) {
+        let signpost = OSSignpostID(log: .input)
+        os_signpost(.begin, log: .input, name: "setCandidates", signpostID: signpost)
+        defer { os_signpost(.end, log: .input, name: "setCandidates", signpostID: signpost) }
         // 渐出途中来了新输入：取消渐出、恢复不透明，按可见窗口继续钉位
         cancelFadeOutIfNeeded()
         fireLog("caret rect: \(caretRect)")

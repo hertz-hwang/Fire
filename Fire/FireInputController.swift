@@ -10,6 +10,7 @@ import SwiftUI
 import InputMethodKit
 import Sparkle
 import Defaults
+import os
 
 typealias NotificationObserver = (name: Notification.Name, callback: (_ notification: Notification) -> Void)
 
@@ -210,6 +211,9 @@ class FireInputController: IMKInputController {
     #endif
 
     private func markText() {
+        let signpost = OSSignpostID(log: .input)
+        os_signpost(.begin, log: .input, name: "mark", signpostID: signpost)
+        defer { os_signpost(.end, log: .input, name: "mark", signpostID: signpost) }
         #if DEBUG
         // 记下「这一帧的组字区画过了」，给 `refreshCandidatesWindow` 里的不变量断言用
         _preeditPaintedFor = _originalString
@@ -1225,6 +1229,9 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
 
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event = event else { return false }
+        let signpost = OSSignpostID(log: .input)
+        os_signpost(.begin, log: .input, name: "handle", signpostID: signpost)
+        defer { os_signpost(.end, log: .input, name: "handle", signpostID: signpost) }
         fireLog("[FireInputController] handle: \(event.debugDescription)")
 
         // 在activateServer中有把IMKInputController绑定给CandidatesWindow
@@ -1260,6 +1267,9 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
     }
 
     func updateCandidates(_ sender: Any!) {
+        let signpost = OSSignpostID(log: .input)
+        os_signpost(.begin, log: .input, name: "updateCandidates", signpostID: signpost)
+        defer { os_signpost(.end, log: .input, name: "updateCandidates", signpostID: signpost) }
         if _originalString.first == "`" {
             let pyQuery = String(_originalString.dropFirst())
             if pyQuery.isEmpty {
