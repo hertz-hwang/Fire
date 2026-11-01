@@ -105,6 +105,11 @@ class Statistics {
         initDB()
     }
 
+    // 上屏记账：解析在主线程，落库在独立串行队列。
+    // 统计库以前用默认 rollback journal + synchronous=FULL，每次上屏都在
+    // 主线程上 prepare + 提交 + 两次 fsync；系统 I/O 一忙就会把按键卡住。
+    private let writeQueue = DispatchQueue(label: "fire.statistics.write", qos: .utility)
+
     @objc func listener(notification: Notification) {
         fireLog("[Statistics] listener: \(notification)")
         guard let candidate = notification.userInfo?["candidate"] as? Candidate else {
@@ -118,47 +123,56 @@ class Statistics {
         // learned：该行是否同时被学习系统实时消费。与 LearnerCenter 读同一
         // 开关、同一通知，时序上等价；历史回填只补 learned=0 的行
         let learned = Defaults[.enableLearning] ? 1 : 0
+        let keyCount = max(0, (notification.userInfo?["keyCount"] as? Int) ?? 0)
+        let text = candidate.text
+        let type = candidate.type.rawValue
+        let code = candidate.code
+        writeQueue.async { [weak self] in
+            self?.insert(text: text, type: type, code: code,
+                         appBundleId: appBundleId, keyCount: keyCount, learned: learned)
+        }
+    }
+
+    /// 落库（只在 `writeQueue` 上执行）。语句每次 prepare/finalize：
+    /// 上屏频率是按键级，比缓存语句更重要的是别和 clear/restore 抢生命周期。
+    private func insert(text: String, type: String, code: String,
+                        appBundleId: String, keyCount: Int, learned: Int) {
         let sql = "insert into data(text, type, code, createdAt, appBundleId, keyCount, learned) values (:text, :type, :code, :createdAt, :appBundleId, :keyCount, :learned)"
         var insertStatement: OpaquePointer?
-        if sqlite3_prepare_v2(database, sql, -1, &insertStatement, nil) == SQLITE_OK {
-            let format = Statistics.insertDateFormatter
-            let keyCount = (notification.userInfo?["keyCount"] as? Int) ?? 0
-            sqlite3_bind_text(insertStatement,
-                              sqlite3_bind_parameter_index(insertStatement, ":text"),
-                              candidate.text, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_text(insertStatement,
-                              sqlite3_bind_parameter_index(insertStatement, ":type"),
-                              candidate.type.rawValue, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_text(insertStatement,
-                              sqlite3_bind_parameter_index(insertStatement, ":code"),
-                              candidate.code, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_text(insertStatement,
-                              sqlite3_bind_parameter_index(insertStatement, ":createdAt"),
-                              format.string(from: Date()), -1, SQLITE_TRANSIENT)
-            sqlite3_bind_text(insertStatement,
-                              sqlite3_bind_parameter_index(insertStatement, ":appBundleId"),
-                              appBundleId, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_int(insertStatement,
-                             sqlite3_bind_parameter_index(insertStatement, ":keyCount"),
-                             Int32(max(0, keyCount)))
-            sqlite3_bind_int(insertStatement,
-                             sqlite3_bind_parameter_index(insertStatement, ":learned"),
-                             Int32(learned))
-
-            if sqlite3_step(insertStatement) == SQLITE_DONE {
-                sqlite3_finalize(insertStatement)
-                insertStatement = nil
-            } else {
-                sqlite3_finalize(insertStatement)
-                insertStatement = nil
-                print("errmsg: \(String(cString: sqlite3_errmsg(database)!))")
-            }
-        } else {
-            sqlite3_finalize(insertStatement)
-            insertStatement = nil
+        defer { sqlite3_finalize(insertStatement) }
+        guard sqlite3_prepare_v2(database, sql, -1, &insertStatement, nil) == SQLITE_OK else {
             print("prepare_errmsg: \(String(cString: sqlite3_errmsg(database)!))")
+            return
         }
-        NotificationCenter.default.post(name: Statistics.updated, object: nil)
+        let format = Statistics.insertDateFormatter
+        sqlite3_bind_text(insertStatement,
+                          sqlite3_bind_parameter_index(insertStatement, ":text"),
+                          text, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(insertStatement,
+                          sqlite3_bind_parameter_index(insertStatement, ":type"),
+                          type, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(insertStatement,
+                          sqlite3_bind_parameter_index(insertStatement, ":code"),
+                          code, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(insertStatement,
+                          sqlite3_bind_parameter_index(insertStatement, ":createdAt"),
+                          format.string(from: Date()), -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(insertStatement,
+                          sqlite3_bind_parameter_index(insertStatement, ":appBundleId"),
+                          appBundleId, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(insertStatement,
+                         sqlite3_bind_parameter_index(insertStatement, ":keyCount"),
+                         Int32(keyCount))
+        sqlite3_bind_int(insertStatement,
+                         sqlite3_bind_parameter_index(insertStatement, ":learned"),
+                         Int32(learned))
+
+        if sqlite3_step(insertStatement) != SQLITE_DONE {
+            print("errmsg: \(String(cString: sqlite3_errmsg(database)!))")
+        }
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: Statistics.updated, object: nil)
+        }
     }
 
     func queryCountByDate(startDate: Date, endDate: Date, appBundleId: String? = nil) -> [DateCount] {
@@ -1031,21 +1045,25 @@ class Statistics {
 
     func backup(to url: URL) throws {
         let sql = "SELECT text, type, code, createdAt, appBundleId, keyCount FROM data ORDER BY id ASC"
-        var stmt: OpaquePointer?
-        var records: [Record] = []
-        if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                records.append(Record(
-                    text: String(cString: sqlite3_column_text(stmt, 0)),
-                    type: String(cString: sqlite3_column_text(stmt, 1)),
-                    code: String(cString: sqlite3_column_text(stmt, 2)),
-                    createdAt: String(cString: sqlite3_column_text(stmt, 3)),
-                    appBundleId: sqlite3_column_text(stmt, 4).map { String(cString: $0) },
-                    keyCount: Int(sqlite3_column_int(stmt, 5))
-                ))
+        // 与写队列对齐，备份拿到的是已提交的完整快照
+        let records: [Record] = writeQueue.sync {
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            var records: [Record] = []
+            if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    records.append(Record(
+                        text: String(cString: sqlite3_column_text(stmt, 0)),
+                        type: String(cString: sqlite3_column_text(stmt, 1)),
+                        code: String(cString: sqlite3_column_text(stmt, 2)),
+                        createdAt: String(cString: sqlite3_column_text(stmt, 3)),
+                        appBundleId: sqlite3_column_text(stmt, 4).map { String(cString: $0) },
+                        keyCount: Int(sqlite3_column_int(stmt, 5))
+                    ))
+                }
             }
+            return records
         }
-        sqlite3_finalize(stmt)
         let payload = Backup(version: 1, exportedAt: ISO8601DateFormatter().string(from: Date()), data: records)
         let encoder = JSONEncoder()
         encoder.outputFormatting = .prettyPrinted
@@ -1054,25 +1072,28 @@ class Statistics {
 
     func restore(from url: URL, merge: Bool) throws {
         let payload = try JSONDecoder().decode(Backup.self, from: Data(contentsOf: url))
-        if !merge {
-            sqlite3_exec(database, "DELETE FROM data", nil, nil, nil)
-        }
-        let sql = "INSERT INTO data(text, type, code, createdAt, appBundleId, keyCount) VALUES (:text, :type, :code, :createdAt, :appBundleId, :keyCount)"
-        sqlite3_exec(database, "BEGIN TRANSACTION", nil, nil, nil)
-        for record in payload.data {
-            var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":text"), record.text, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":type"), record.type, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":code"), record.code, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":createdAt"), record.createdAt, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":appBundleId"), record.appBundleId ?? "", -1, SQLITE_TRANSIENT)
-                sqlite3_bind_int(stmt, sqlite3_bind_parameter_index(stmt, ":keyCount"), Int32(record.keyCount ?? 0))
-                sqlite3_step(stmt)
+        // 整段恢复在写队列上执行：与实时上屏记账串行，避免恢复过程中再插进新行
+        writeQueue.sync {
+            if !merge {
+                sqlite3_exec(database, "DELETE FROM data", nil, nil, nil)
             }
-            sqlite3_finalize(stmt)
+            let sql = "INSERT INTO data(text, type, code, createdAt, appBundleId, keyCount) VALUES (:text, :type, :code, :createdAt, :appBundleId, :keyCount)"
+            sqlite3_exec(database, "BEGIN TRANSACTION", nil, nil, nil)
+            for record in payload.data {
+                var stmt: OpaquePointer?
+                if sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK {
+                    sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":text"), record.text, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":type"), record.type, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":code"), record.code, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":createdAt"), record.createdAt, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, ":appBundleId"), record.appBundleId ?? "", -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_int(stmt, sqlite3_bind_parameter_index(stmt, ":keyCount"), Int32(record.keyCount ?? 0))
+                    sqlite3_step(stmt)
+                }
+                sqlite3_finalize(stmt)
+            }
+            sqlite3_exec(database, "COMMIT", nil, nil, nil)
         }
-        sqlite3_exec(database, "COMMIT", nil, nil, nil)
         NotificationCenter.default.post(name: Statistics.updated, object: nil)
     }
 
@@ -1168,8 +1189,10 @@ class Statistics {
     }
 
     func clear() {
-        let sql = "delete from data"
-        sqlite3_exec(database, sql, nil, nil, nil)
+        // 与写队列串行：清空后不会再有更早的插入落进来
+        writeQueue.sync {
+            sqlite3_exec(database, "delete from data", nil, nil, nil)
+        }
         NotificationCenter.default.post(name: Statistics.updated, object: nil)
     }
 
@@ -1257,6 +1280,10 @@ class Statistics {
             nil
         ) == SQLITE_OK {
             sqlite3_key(database, key!, Int32(key!.count))
+            // 上屏记账是高频单行写入：WAL 下读写不互斥，NORMAL 不再每次提交都 fsync。
+            // 配合 writeQueue 的异步落库，主线程不再被统计库的提交卡住。
+            sqlite3_exec(database, "PRAGMA journal_mode=WAL", nil, nil, nil)
+            sqlite3_exec(database, "PRAGMA synchronous=NORMAL", nil, nil, nil)
             _ = Statistics.migrate(database)
         } else {
             NSLog("[Statistics] init DB, open error: \(String(cString: sqlite3_errmsg(database)))")
