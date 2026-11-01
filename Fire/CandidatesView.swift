@@ -240,6 +240,8 @@ struct CandidatesView: View {
 
     var candidates: [Candidate]
     var origin: String
+    /// 顶部编码行显示串：nil 时显示原码
+    var codeLine: String? = nil
     var hasPrev: Bool = false
     var hasNext: Bool = false
     /// 当前页码（页码指示 "n/m" 用）
@@ -309,7 +311,7 @@ struct CandidatesView: View {
     ) -> some View {
         let lineHeight = measure("x", codeFont).height
         return HStack(spacing: 0) {
-            Text(origin)
+            Text(codeLine ?? origin)
                 .font(swiftFont(theme, size: CGFloat(theme.codeFontSize)))
                 .foregroundColor(Color(theme.originCodeColor))
                 .fixedSize()

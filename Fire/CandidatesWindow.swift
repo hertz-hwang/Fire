@@ -222,6 +222,7 @@ class CandidatesWindow: NSWindow, NSWindowDelegate {
     func setCandidates(
         _ candidatesData: CandidatesData,
         originalString: String,
+        codeLine: String? = nil,
         caretRect: NSRect,
         highlightIndex: Int = 0
     ) {
@@ -235,6 +236,7 @@ class CandidatesWindow: NSWindow, NSWindowDelegate {
         var upcoming = hostingView.rootView
         upcoming.candidates = candidatesData.list
         upcoming.origin = originalString
+        upcoming.codeLine = codeLine
         upcoming.hasNext = candidatesData.hasNext
         upcoming.hasPrev = candidatesData.hasPrev
         upcoming.page = candidatesData.page
@@ -537,7 +539,7 @@ enum CandidatesPreviewRenderer {
             ("sentence-diff-light", {
                 CandidatesView(
                     candidates: sentenceCandidates, origin: "wjwdc",
-                    highlightIndex: 1,
+                    codeLine: "wj wxc", highlightIndex: 1,
                     themeOverride: previewTheme,
                     directionOverride: .vertical,
                     showCodeInWindowOverride: true,
@@ -546,7 +548,7 @@ enum CandidatesPreviewRenderer {
             ("sentence-dark", {
                 CandidatesView(
                     candidates: sentenceCandidates, origin: "wjwdc",
-                    highlightIndex: 1,
+                    codeLine: "wj wxc", highlightIndex: 1,
                     themeOverride: darkTheme,
                     directionOverride: .vertical,
                     showCodeInWindowOverride: true,
@@ -555,7 +557,7 @@ enum CandidatesPreviewRenderer {
             ("sentence-horizontal-light", {
                 CandidatesView(
                     candidates: sentenceCandidates, origin: "wjwdc",
-                    highlightIndex: 1,
+                    codeLine: "wj wxc", highlightIndex: 1,
                     themeOverride: previewTheme,
                     directionOverride: .horizontal,
                     showCodeInWindowOverride: true,

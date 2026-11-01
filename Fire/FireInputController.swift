@@ -225,7 +225,7 @@ class FireInputController: IMKInputController {
                 selected = self._originalString.count > 0 ? " " : ""
             } else if Defaults[.codeInWindowMode] == .firstCandidate && !self._originalString.isEmpty {
                 selected = sentenceFocusedCandidate()?.text ?? _candidates.first?.text ?? self._originalString
-            } else if let segmented = pinyinPreedit() ?? sentenceSegmentedPreedit() {
+            } else if let segmented = pinyinPreedit() ?? sentenceSegmentedCode() {
                 selected = segmented
             }
             let text = NSAttributedString(string: selected, attributes: attributes)
@@ -239,19 +239,23 @@ class FireInputController: IMKInputController {
         return _candidates[_sentenceHighlightIndex]
     }
 
-    /// 整句模式下组字区按焦点候选的分段码显示（如 `sb ear lh mw ajt sba vbz gc`）。
+    /// 整句焦点候选的分段码（如 `sb ear lh mw ajt sba vbz gc`）。
     /// 仅当分段码恰好覆盖全部已敲键时启用——含选重符（`;`/`'`/数字）时
     /// 分段码已剥掉这些键，回退显示原码以免删键时显示与实际不一致。
-    private func sentenceSegmentedPreedit() -> String? {
-        guard !Defaults[.showCodeInWindow],
-              Defaults[.codeInWindowMode] != .firstCandidate,
-              !_originalString.isEmpty,
+    private func sentenceSegmentedCode() -> String? {
+        guard !_originalString.isEmpty,
               let focused = sentenceFocusedCandidate(),
               focused.type == .sentence else { return nil }
         let code = focused.code
         guard code != _originalString,
               code.filter({ $0 != " " }) == _originalString.filter({ $0 != " " }) else { return nil }
         return code
+    }
+
+    /// 候选窗顶部编码行：与组字区同一套分段规则（拼音按音节、形码整句按候选字），
+    /// 分段码不完整覆盖已敲键时退回原码。
+    private func candidateWindowCodeLine() -> String {
+        pinyinPreedit() ?? sentenceSegmentedCode() ?? _originalString
     }
 
     /// 拼音方案的组字区：显示分段后的读音（`ni'hao`）而不是原键。
@@ -1617,6 +1621,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
         CandidatesWindow.shared.setCandidates(
             candidatesData,
             originalString: _originalString,
+            codeLine: candidateWindowCodeLine(),
             caretRect: getCaretRect(),
             highlightIndex: _sentenceActive ? _sentenceHighlightIndex : 0
         )
@@ -1636,7 +1641,7 @@ private func reverseLookupKeyHandler(event: NSEvent) -> Bool? {
             if let selected = selected {
                 return NSRange(location: 0, length: selected.text.count)
             }
-        } else if let marked = pinyinPreedit() ?? sentenceSegmentedPreedit() {
+        } else if let marked = pinyinPreedit() ?? sentenceSegmentedCode() {
             // 分段码/分段读音比原码多出的 `'` 与空格也在合成串里：selection 要覆盖
             // 完整显示串，否则应用按原码长度画插入点，合成区尾部看着像没选中
             return NSRange(location: 0, length: marked.count)
