@@ -38,9 +38,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statistics: Statistics!
     var statusBar: StatusBar!
     var cliServer: FireCLIServer!
-    var preferencesHotkeyMonitor: Any?
     private var preferencesHotkeyTap: CFMachPort?
     private var preferencesHotkeyRunLoopSource: CFRunLoopSource?
+    // 全局快捷键：优先 Carbon RegisterEventHotKey（不把输入法主线程放进
+    // 系统按键链路），注册失败时才退回事件 tap。
+    private var preferencesHotKeyRef: EventHotKeyRef?
+    private var preferencesHotKeyHandler: EventHandlerRef?
+    private var preferencesHotkeyObserver: Defaults.Observation?
 
     func installInputSource() {
         print("install input source")
@@ -339,7 +343,104 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 // MARK: - Preferences Hotkey
 extension AppDelegate {
     private func installPreferencesHotkeyMonitor() {
+        applyPreferencesHotkey()
+        // 快捷键改了要重新注册；Carbon 热键是按当前键位一次性注册的
+        preferencesHotkeyObserver = Defaults.observe(
+            keys: .openPreferencesShortcutModifier, .openPreferencesShortcutKey
+        ) { [weak self] in
+            guard let self else { return }
+            if Thread.isMainThread {
+                self.applyPreferencesHotkey()
+            } else {
+                DispatchQueue.main.async { self.applyPreferencesHotkey() }
+            }
+        }
+    }
+
+    /// 卸载并重装全局快捷键：先试 Carbon 热键，失败（fn 修饰键 / 组合键被占用 /
+    /// 注册失败）再退回事件 tap。Carbon 路径不需要辅助功能权限。
+    private func applyPreferencesHotkey() {
+        uninstallPreferencesHotkey()
+        if registerPreferencesHotKey() {
+            NSLog("[Fire] preferences hotkey registered via Carbon")
+            return
+        }
+        NSLog("[Fire] Carbon hotkey unavailable, falling back to event tap")
         installPreferencesHotkeyTap()
+    }
+
+    private func uninstallPreferencesHotkey() {
+        if let ref = preferencesHotKeyRef {
+            UnregisterEventHotKey(ref)
+            preferencesHotKeyRef = nil
+        }
+        if let handler = preferencesHotKeyHandler {
+            RemoveEventHandler(handler)
+            preferencesHotKeyHandler = nil
+        }
+        if let tap = preferencesHotkeyTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            if let source = preferencesHotkeyRunLoopSource {
+                CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+            }
+            CFMachPortInvalidate(tap)
+            preferencesHotkeyTap = nil
+            preferencesHotkeyRunLoopSource = nil
+        }
+    }
+
+    private static func carbonModifiers(for key: ModifierKey) -> UInt32? {
+        switch key {
+        case .control:
+            return UInt32(controlKey)
+        case .command:
+            return UInt32(cmdKey)
+        case .option:
+            return UInt32(optionKey)
+        case .shift, .leftShift, .rightShift:
+            return UInt32(shiftKey)
+        case .function:
+            // Carbon 没有可用的 fn 修饰键掩码，交给事件 tap 兜底
+            return nil
+        }
+    }
+
+    private func registerPreferencesHotKey() -> Bool {
+        guard let modifiers = AppDelegate.carbonModifiers(
+                for: Defaults[.openPreferencesShortcutModifier]) else { return false }
+        let key = Defaults[.openPreferencesShortcutKey].lowercased()
+        guard let keyCode = AppDelegate.keyCode(for: key) else { return false }
+
+        if preferencesHotKeyHandler == nil {
+            var eventType = EventTypeSpec(
+                eventClass: OSType(kEventClassKeyboard),
+                eventKind: UInt32(kEventHotKeyPressed))
+            let status = InstallEventHandler(
+                GetApplicationEventTarget(),
+                { _, _, userData -> OSStatus in
+                    guard let userData else { return OSStatus(eventNotHandledErr) }
+                    DispatchQueue.main.async {
+                        FirePreferencesController.shared.show()
+                    }
+                    return noErr
+                },
+                1, &eventType,
+                Unmanaged.passUnretained(self).toOpaque(),
+                &preferencesHotKeyHandler)
+            guard status == noErr, preferencesHotKeyHandler != nil else { return false }
+        }
+
+        var hotKeyRef: EventHotKeyRef?
+        let hotKeyID = EventHotKeyID(signature: OSType(0x46495245), id: 1) // 'FIRE'
+        let status = RegisterEventHotKey(
+            UInt32(keyCode), modifiers, hotKeyID,
+            GetApplicationEventTarget(), 0, &hotKeyRef)
+        guard status == noErr, let hotKeyRef else {
+            NSLog("[Fire] RegisterEventHotKey status=%d", status)
+            return false
+        }
+        preferencesHotKeyRef = hotKeyRef
+        return true
     }
 
     private static let modifierMask: NSEvent.ModifierFlags = [
